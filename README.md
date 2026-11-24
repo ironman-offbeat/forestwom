@@ -2,6 +2,8 @@
 
 **성남시 건축협의 조경 검토를 위한 가상·비식별 자료 전용 웹앱.** PDF 원본과 추출값을 대조하고, 사람이 확정한 수치로 제한적인 면적 검산 및 의견서 초안을 작성합니다.
 
+[웹앱 열기](https://ironman-offbeat.github.io/forestwom/) · [자동 검증·배포 상태](https://github.com/ironman-offbeat/forestwom/actions)
+
 ## 사용 순서
 
 1. 가상·비식별 자료 확인 후 PDF 선택 또는 가상 자료 버튼 클릭.
