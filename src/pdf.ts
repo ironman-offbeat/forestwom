@@ -11,8 +11,12 @@ export type Document = {
   name: string;
   pdf: PDFDocumentProxy;
   pages: Page[];
+  file: File;
 };
-export async function readPDF(file: File): Promise<Document> {
+export async function readPDF(
+  file: File,
+  restoredId?: string,
+): Promise<Document> {
   if (file.size > 30 * 1024 * 1024)
     throw new Error("파일당 30MB 이하만 지원합니다.");
   if (!/\.pdf$/i.test(file.name)) throw new Error("PDF 파일만 선택하세요.");
@@ -20,7 +24,10 @@ export async function readPDF(file: File): Promise<Document> {
   if (new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-")
     throw new Error("PDF 파일 형식이 아닙니다.");
   // Worker fetches must resolve against the app, not the worker's /assets/ URL.
-  const assetBase = new URL(`${import.meta.env.BASE_URL}pdfjs/`, document.baseURI).href;
+  const assetBase = new URL(
+    `${import.meta.env.BASE_URL}pdfjs/`,
+    document.baseURI,
+  ).href;
   const task = getDocument({
     data: bytes,
     enableXfa: false,
@@ -38,14 +45,12 @@ export async function readPDF(file: File): Promise<Document> {
   try {
     pdf = await task.promise;
   } catch {
-    throw new Error(
-      "손상되었거나 암호화된 PDF입니다. 비식별 PDF를 확인하세요.",
-    );
+    throw new Error("손상되었거나 암호화된 PDF입니다. 원본 PDF를 확인하세요.");
   }
   try {
     if (pdf.numPages > 100)
       throw new Error("파일당 100페이지 이하만 지원합니다.");
-    const id = crypto.randomUUID(),
+    const id = restoredId ?? crypto.randomUUID(),
       pages: Page[] = [];
     for (let number = 1; number <= pdf.numPages; number++) {
       const page = await pdf.getPage(number);
@@ -64,7 +69,7 @@ export async function readPDF(file: File): Promise<Document> {
         kind: classify(text),
       });
     }
-    return { id, name: file.name, pdf, pages };
+    return { id, name: file.name, pdf, pages, file };
   } catch (e) {
     await pdf.loadingTask.destroy();
     throw e;

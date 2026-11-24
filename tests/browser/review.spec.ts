@@ -10,9 +10,6 @@ const labels = [
 ];
 async function start(page: Page, sample = "정상 수치") {
   await page.goto("/");
-  await page
-    .getByLabel("실제 민원자료가 아닌 가상·비식별 자료임을 확인했습니다.")
-    .check();
   await page.getByRole("button", { name: sample, exact: true }).click();
   await expect(page.getByRole("status")).toContainText("등록됨");
 }
@@ -133,9 +130,6 @@ test("file picker handles corrupt PDF with explicit failure", async ({
 }) => {
   await page.goto("/");
   await page
-    .getByLabel("실제 민원자료가 아닌 가상·비식별 자료임을 확인했습니다.")
-    .check();
-  await page
     .getByLabel("PDF 파일 선택")
     .setInputFiles("public/samples/corrupt.pdf");
   await expect(page.getByRole("alert")).toContainText("손상");
@@ -178,9 +172,6 @@ test("Korean CMap PDF extraction and rendering use local assets", async ({
   page,
 }) => {
   await page.goto("/");
-  await page
-    .getByLabel("실제 민원자료가 아닌 가상·비식별 자료임을 확인했습니다.")
-    .check();
   await page
     .getByLabel("PDF 파일 선택")
     .setInputFiles("public/samples/korean.pdf");

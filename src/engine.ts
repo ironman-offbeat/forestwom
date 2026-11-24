@@ -1,4 +1,4 @@
-export const RULE_VERSION = "2026-11-24.experimental.1";
+export const RULE_VERSION = "2026-11-25.1";
 export const fields = [
   ["site", "대지면적", "Site area"],
   ["gross", "연면적", "Gross floor area"],

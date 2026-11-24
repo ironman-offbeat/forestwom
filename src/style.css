@@ -613,3 +613,9 @@ select {
     overflow-wrap: anywhere;
   }
 }
+
+.howto { padding-left: 1.3rem; line-height: 1.9; color: #425a4e; }
+.repository { border-bottom: 1px solid #dae4db; margin-bottom: 20px; padding-bottom: 20px; }
+.storage-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+
+.app-fields {border:0;padding:0;margin:0;min-width:0;}
