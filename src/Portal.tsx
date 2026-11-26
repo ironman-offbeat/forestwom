@@ -589,9 +589,9 @@ function Admin({ id }: { id?: string }) {
                   </button>
                 </section>
                 <section className="card">
-                  <h2>1. 이 채팅에서 분석하기</h2>
+                  <h2>1. ChatGPT에서 분석하기</h2>
                   <p>
-                    원본 PDF와 분석 요청문을 받아 이 채팅에 첨부하세요. 분석 후
+                    원본 PDF와 분석 요청문을 받아 ChatGPT에 첨부하세요. 분석 후
                     의견서 PDF와 JSON을 아래에 등록합니다.
                   </p>
                   {c.originals.map((f) => (
