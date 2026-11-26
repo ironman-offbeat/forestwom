@@ -63,3 +63,13 @@
 - 브라우저 테스트는 가상 입력 기준이며 법령·특례의 완전성, 기관 승인, 전자결재 보안성을 증명하지 않는다.
 - PDF.js 포함 주 번들 약 687kB, worker 약 1.27MB의 크기 경고가 있다. 빌드 실패는 아니며 로컬 문자·렌더링 기능을 위해 포함한다.
 - 원격 CI·배포 결과는 GitHub Actions 실행 기록을 기준으로 확인한다.
+
+## 2026-11-26 운영 Drive 연결 검증
+
+- 소유자 OAuth 승인 후 Google 인증 변수 3개를 Vercel Production Secret으로 등록했다. 비밀값은 Git에 포함하지 않았다.
+- 배포 dpl_13DGcx1Q7VTZCS6h5qfWhZM7VmFD READY 확인, forestwom.2hayoung.com에 반영.
+- Chrome 운영 화면에서 가상 korean.pdf 등록 → 저장소에 넣어두기 → 저장 완료 확인.
+- 생성 폴더: [2026-11-26] Drive 연결 확인 - 가상 한글 도면 · 110645-b78d6509.
+- 원본 PDF, 의견서 PDF, review.json 저장 후 목록 선택 → 불러오기 완료 및 원본 1페이지 복원 확인.
+- 이용자 Google 로그인 없이 성공. 실제 민원자료는 사용하지 않았다.
+- Slack 자동 알림과 입력/결과/관리자 페이지 분리는 아직 구현되지 않았다.
