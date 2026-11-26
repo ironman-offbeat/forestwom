@@ -1,3 +1,6 @@
 {
-  "functions": { "api/storage.mjs": { "maxDuration": 60 } }
+  "functions": {
+    "api/storage.mjs": { "maxDuration": 60 },
+    "api/requests.mjs": { "maxDuration": 60 }
+  }
 }

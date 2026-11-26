@@ -9,7 +9,7 @@ const labels = [
   "벽면녹화면적",
 ];
 async function start(page: Page, sample = "정상 수치") {
-  await page.goto("/");
+  await page.goto("/#/review");
   await page.getByRole("button", { name: sample, exact: true }).click();
   await expect(page.getByRole("status")).toContainText("등록됨");
 }
@@ -128,7 +128,7 @@ test("scan and mixed documents stay held", async ({ page }) => {
 test("file picker handles corrupt PDF with explicit failure", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/#/review");
   await page
     .getByLabel("PDF 파일 선택")
     .setInputFiles("public/samples/corrupt.pdf");
@@ -171,7 +171,7 @@ test("failed documents cannot be silently omitted and reset recovers", async ({
 test("Korean CMap PDF extraction and rendering use local assets", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/#/review");
   await page
     .getByLabel("PDF 파일 선택")
     .setInputFiles("public/samples/korean.pdf");

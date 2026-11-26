@@ -4,7 +4,7 @@ import { PDFDocument } from "pdf-lib";
 test("creates a real Korean PDF download and removes obsolete notices", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/#/review");
   await expect(page.locator("body")).not.toContainText("실자료 사용 금지");
   await expect(page.locator("h1")).toContainText("PDF를 넣고");
   await page.getByRole("button", { name: "한글 도면", exact: true }).click();
@@ -34,7 +34,7 @@ test("missing Google configuration does not claim successful saving", async ({
       },
     }),
   );
-  await page.goto("/");
+  await page.goto("/#/review");
   await page.getByRole("button", { name: "정상 수치", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("등록됨");
   await page.getByRole("button", { name: "저장소에 넣어두기" }).click();
@@ -93,7 +93,7 @@ test("save and reopen preserve originals, notes and source pages; approvals requ
       };
     await route.fulfill({ json: result });
   });
-  await page.goto("/");
+  await page.goto("/#/review");
   await page.getByRole("button", { name: "한글 도면", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("등록됨");
   await page.getByLabel("대지면적 후보", { exact: true }).selectOption("0");

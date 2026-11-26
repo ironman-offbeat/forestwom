@@ -420,10 +420,50 @@ export default function App() {
             </div>
           </section>
           <nav className="steps no-print">
-            <a href="#input">01 자료 등록</a>
-            <a href="#verify">02 원본 대조</a>
-            <a href="#rules">03 적용 기준</a>
-            <a href="#report">04 검토 의견서</a>
+            <a
+              href="#/review/input"
+              onClick={(e) => {
+                e.preventDefault();
+                document
+                  .getElementById("input")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              01 자료 등록
+            </a>
+            <a
+              href="#/review/verify"
+              onClick={(e) => {
+                e.preventDefault();
+                document
+                  .getElementById("verify")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              02 원본 대조
+            </a>
+            <a
+              href="#/review/rules"
+              onClick={(e) => {
+                e.preventDefault();
+                document
+                  .getElementById("rules")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              03 적용 기준
+            </a>
+            <a
+              href="#/review/report"
+              onClick={(e) => {
+                e.preventDefault();
+                document
+                  .getElementById("report")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              04 검토 의견서
+            </a>
           </nav>
           <section id="input" className="panel no-print">
             <div className="section-title">

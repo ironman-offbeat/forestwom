@@ -1,10 +1,19 @@
 # Forestwom
 
-**성남시 건축협의 조경 검토 웹앱.** PDF 원본과 추출값을 대조하고, 사람이 확정한 수치로 제한적인 면적 검산 및 의견서 초안을 작성합니다.
+**성남시 건축협의 조경 검토 웹앱.** PDF 접수 → 소유자가 ChatGPT에서 분석 → 관리자 결과 PDF·JSON 등록 → 결과 페이지 공개로 운영합니다. 유료 AI API와 GAS는 사용하지 않습니다.
 
 [웹앱 열기](https://forestwom.2hayoung.com) · [자동 검증·배포 상태](https://github.com/ironman-offbeat/forestwom/actions)
 
 ## 사용 순서
+
+1. 입력 페이지에서 PDF·도면 이름·요청 메모를 등록하고 결과 링크를 보관합니다.
+2. 원본 검증과 Drive 저장이 완료되면 소유자에게 Slack 알림을 전송합니다. Slack 미연결/실패는 관리자 화면에서 재전송합니다.
+3. 관리자는 `/#/admin`에서 로그인하여 원본과 분석 요청문을 받아 ChatGPT에 첨부합니다.
+4. 분석 결과 PDF·JSON을 등록하고 근거·최신성을 확인한 후 공개합니다. 이용자는 결과 링크에서 의견서를 확인하고 PDF를 받습니다.
+
+[접수·관리자·Slack 연결 안내](docs/REQUEST_WORKFLOW.md) · [작업계획](docs/WORK_PLAN_V3.md)
+
+### 기존 원본 대조·검산 도구 (`/#/review`)
 
 1. PDF 선택 또는 가상 자료 버튼 클릭.
 2. 각 수치의 추출 후보를 선택하고 근거 페이지를 열어 원본 대조. 수정값 및 검수 사유 입력 후 확정.
@@ -57,7 +66,7 @@ npm run build
 
 ## 문서 및 배포
 
-- [최신 작업계획 및 변경 내용](docs/WORK_PLAN_V2.md)
+- [최신 작업계획 및 변경 내용](docs/WORK_PLAN_V3.md)
 - [Google Drive 소유자 연결](docs/GOOGLE_DRIVE_SETUP.md)
 - [법령 검증·상충 규칙](docs/LEGAL_REVIEW.md)
 - [테스트 결과](docs/TEST_RESULTS.md)
