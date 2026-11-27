@@ -1,18 +1,84 @@
 import { test, expect } from "@playwright/test";
-test('administrator previews and explicitly publishes matching result files',async({page})=>{
- const c={id:'case_1234567890',name:'한글 도면',state:'submitted',note:'',notification:{state:'sent'},originals:[{id:'pdf_1234567890',name:'korean.pdf',hash:'a'.repeat(64),size:100,type:'application/pdf'}],versions:[]};
- let published=false;
- await page.route('**/api/requests',route=>{const b=route.request().postDataJSON();if(b.action==='publish'){published=b.confirmed;return route.fulfill({json:{...c,state:'published'}});}const data:any={session:{admin:true},health:{slack:true},detail:c,resultBegin:{session:'result-session'},upload:{ticket:'t'},chunk:{complete:true}};return route.fulfill({json:data[b.action]||{}});});
- await page.goto('/#/admin/case_1234567890');
- await page.getByLabel('결과 PDF',{exact:true}).setInputFiles('public/samples/korean.pdf');
- const result={schemaVersion:1,requestId:c.id,summary:'원본 대조 완료',reviewer:'담당자',reviewedAt:'2026-11-26',originals:c.originals,findings:[],holds:[],lawConfirmed:true,lawCheckedAt:'2026-11-26',lawNote:'확인'};
- await page.getByLabel('결과 JSON',{exact:true}).setInputFiles({name:'result.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(result))});
- await expect(page.getByText('원본 대조 완료',{exact:true})).toBeVisible();
- await expect(page.getByRole('button',{name:'검토 결과 공개'})).toBeDisabled();
- await page.getByRole('checkbox').check();await page.getByRole('button',{name:'검토 결과 공개'}).click();
- await expect(page.getByRole('status')).toContainText('결과가 공개되었습니다.');expect(published).toBe(true);
+test("administrator previews and explicitly publishes matching result files", async ({
+  page,
+}) => {
+  const c = {
+    id: "case_1234567890",
+    name: "한글 도면",
+    state: "submitted",
+    note: "",
+    notification: { state: "sent" },
+    originals: [
+      {
+        id: "pdf_1234567890",
+        name: "korean.pdf",
+        hash: "a".repeat(64),
+        size: 100,
+        type: "application/pdf",
+      },
+    ],
+    versions: [],
+  };
+  let published = false;
+  await page.route("**/api/requests", (route) => {
+    const b = route.request().postDataJSON();
+    if (b.action === "publish") {
+      published = b.confirmed;
+      return route.fulfill({ json: { ...c, state: "published" } });
+    }
+    const data: any = {
+      session: { admin: true },
+      health: { slack: true },
+      detail: c,
+      resultBegin: { session: "result-session" },
+      upload: { ticket: "t" },
+      chunk: { complete: true },
+    };
+    return route.fulfill({ json: data[b.action] || {} });
+  });
+  await page.goto("/#/admin/case_1234567890");
+  await page
+    .getByLabel("결과 PDF", { exact: true })
+    .setInputFiles("public/samples/korean.pdf");
+  const result = {
+    schemaVersion: 1,
+    requestId: c.id,
+    summary: "원본 대조 완료",
+    reviewer: "담당자",
+    reviewedAt: "2026-11-26",
+    originals: c.originals,
+    findings: [],
+    holds: [],
+    lawConfirmed: true,
+    lawCheckedAt: "2026-11-26",
+    lawNote: "확인",
+  };
+  await page
+    .getByLabel("결과 JSON", { exact: true })
+    .setInputFiles({
+      name: "result.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(result)),
+    });
+  await expect(page.getByText("원본 대조 완료", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "검토 결과 공개" }),
+  ).toBeDisabled();
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "검토 결과 공개" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "결과가 공개되었습니다.",
+  );
+  expect(published).toBe(true);
 });
-test('intake fits a mobile viewport',async({page})=>{await page.setViewportSize({width:390,height:844});await page.goto('/');await expect(page.getByRole('heading',{level:1})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);});
+test("intake fits a mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+});
 test("intake reveals only required inputs, submits and shows pending result link", async ({
   page,
 }) => {
@@ -100,7 +166,7 @@ test("failed upload remains on intake and retries same session", async ({
   await expect(page).toHaveURL(/result/);
   expect(began).toBe(1);
 });
-test("administrator login and JSON mismatch block publication", async ({
+test("Slack review link opens without login and JSON mismatch blocks publication", async ({
   page,
 }) => {
   let admin = false;
@@ -134,20 +200,17 @@ test("administrator login and JSON mismatch block publication", async ({
     return route.fulfill({ json: data[b.action] || {} });
   });
   await page.goto("/#/admin/case_1234567890");
-  await page.getByLabel("관리자 키").fill("test-only-key");
-  await page.getByRole("button", { name: "관리자 로그인" }).click();
+  await expect(page.getByLabel("관리자 키")).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "한글 도면", exact: true }),
   ).toBeVisible();
-  await page
-    .getByLabel("결과 JSON", { exact: true })
-    .setInputFiles({
-      name: "wrong.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(
-        JSON.stringify({ schemaVersion: 1, requestId: "wrong" }),
-      ),
-    });
+  await page.getByLabel("결과 JSON", { exact: true }).setInputFiles({
+    name: "wrong.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({ schemaVersion: 1, requestId: "wrong" }),
+    ),
+  });
   await expect(page.getByRole("alert")).toContainText("접수번호");
   await expect(
     page.getByRole("button", { name: "검토 결과 공개" }),

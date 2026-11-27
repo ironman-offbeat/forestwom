@@ -350,9 +350,7 @@ function Result({ id }: { id?: string }) {
   );
 }
 function Admin({ id }: { id?: string }) {
-  const [authenticated, setAuthenticated] = useState(false),
-    [key, setKey] = useState(""),
-    [busy, setBusy] = useState(false),
+  const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
     [items, setItems] = useState<any[]>([]),
@@ -394,11 +392,7 @@ function Admin({ id }: { id?: string }) {
     setSlack((await request("health")).slack);
   }
   useEffect(() => {
-    void work(async () => {
-      const s = await request("session");
-      setAuthenticated(s.admin);
-      if (s.admin) await load();
-    });
+    void work(load);
   }, [id]);
   async function openJson(f: File) {
     setJson(null);
@@ -435,286 +429,239 @@ function Admin({ id }: { id?: string }) {
     <>
       <p className="eyebrow">관리자</p>
       <h1>{c ? c.name : "검토 요청 관리"}</h1>
-      {!authenticated ? (
-        <form
-          className="card"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void work(async () => {
-              await request("login", { key });
-              setKey("");
-              setAuthenticated(true);
-              await load();
-            });
-          }}
-        >
-          <label>
-            관리자 키
-            <input
-              type="password"
-              autoComplete="current-password"
-              required
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-            />
-          </label>
-          <button className="primary" disabled={busy}>
-            관리자 로그인
+      <>
+        <div className="toolbar">
+          <a href="#/admin">접수 목록</a>
+          <a href="#/review">원본 대조·검산 도구</a>
+          <button disabled={busy} onClick={() => work(load)}>
+            새로고침
           </button>
-        </form>
-      ) : (
-        <>
-          <div className="toolbar">
-            <a href="#/admin">접수 목록</a>
-            <a href="#/review">원본 대조·검산 도구</a>
-            <button disabled={busy} onClick={() => work(load)}>
-              새로고침
-            </button>
-            <button
-              disabled={busy}
-              onClick={() =>
-                work(async () => {
-                  await request("logout");
-                  setAuthenticated(false);
-                  setCase(null);
-                })
-              }
-            >
-              로그아웃
-            </button>
-          </div>
-          {!slack && (
-            <p className="notice">
-              Slack 연결이 필요합니다. 접수는 저장되며, 연결 후 각 요청에서
-              알림을 재전송할 수 있습니다.
-            </p>
-          )}
-          {!id ? (
-            <section className="card">
-              <h2>접수 목록</h2>
-              {!items.length ? (
-                <p>접수된 자료가 없습니다.</p>
-              ) : (
-                items.map((x) => (
-                  <a className="case-link" href={`#/admin/${x.id}`} key={x.id}>
-                    {x.name}
-                    <small>
-                      {new Date(x.createdTime).toLocaleString("ko-KR")}
-                    </small>
-                  </a>
-                ))
-              )}
-              {cursor && (
+        </div>
+        {!slack && (
+          <p className="notice">
+            Slack 연결이 필요합니다. 접수는 저장되며, 연결 후 각 요청에서 알림을
+            재전송할 수 있습니다.
+          </p>
+        )}
+        {!id ? (
+          <section className="card">
+            <h2>접수 목록</h2>
+            {!items.length ? (
+              <p>접수된 자료가 없습니다.</p>
+            ) : (
+              items.map((x) => (
+                <a className="case-link" href={`#/admin/${x.id}`} key={x.id}>
+                  {x.name}
+                  <small>
+                    {new Date(x.createdTime).toLocaleString("ko-KR")}
+                  </small>
+                </a>
+              ))
+            )}
+            {cursor && (
+              <button
+                disabled={busy}
+                onClick={() =>
+                  work(async () => {
+                    const r = await request("list", { cursor });
+                    setItems([...items, ...r.files]);
+                    setCursor(r.nextPageToken);
+                  })
+                }
+              >
+                더 보기
+              </button>
+            )}
+          </section>
+        ) : (
+          c && (
+            <>
+              <section className="card">
+                <span className="pill">{states[c.state]}</span>
+                <p>접수번호: {c.id}</p>
+                <p>{c.note || "요청 메모 없음"}</p>
+                <a href={`#/result/${c.id}`}>결과 페이지 열기 ↗</a>
+                <div className="toolbar">
+                  <button
+                    disabled={busy || c.state === "uploading"}
+                    onClick={() =>
+                      work(async () =>
+                        setCase(
+                          await request("state", {
+                            id: c.id,
+                            state: "analyzing",
+                          }),
+                        ),
+                      )
+                    }
+                  >
+                    분석 시작
+                  </button>
+                  <button
+                    disabled={busy || c.state === "uploading"}
+                    onClick={() =>
+                      work(async () =>
+                        setCase(
+                          await request("state", {
+                            id: c.id,
+                            state: "needs_material",
+                          }),
+                        ),
+                      )
+                    }
+                  >
+                    추가 자료 필요
+                  </button>
+                </div>
+                <p>
+                  Slack 알림:{" "}
+                  {
+                    (
+                      {
+                        sent: "전송 완료",
+                        failed: "전송 실패",
+                        pending: "연결 대기",
+                        unknown: "전송 상태 확인 필요",
+                      } as Record<string, string>
+                    )[c.notification.state]
+                  }
+                </p>
                 <button
-                  disabled={busy}
+                  disabled={
+                    busy ||
+                    c.notification.state === "sent" ||
+                    c.state === "uploading"
+                  }
                   onClick={() =>
                     work(async () => {
-                      const r = await request("list", { cursor });
-                      setItems([...items, ...r.files]);
-                      setCursor(r.nextPageToken);
+                      await request("notify", { id: c.id });
+                      await load();
                     })
                   }
                 >
-                  더 보기
+                  Slack 알림 재전송
                 </button>
-              )}
-            </section>
-          ) : (
-            c && (
-              <>
-                <section className="card">
-                  <span className="pill">{states[c.state]}</span>
-                  <p>접수번호: {c.id}</p>
-                  <p>{c.note || "요청 메모 없음"}</p>
-                  <a href={`#/result/${c.id}`}>결과 페이지 열기 ↗</a>
-                  <div className="toolbar">
-                    <button
-                      disabled={busy || c.state === "uploading"}
-                      onClick={() =>
-                        work(async () =>
-                          setCase(
-                            await request("state", {
-                              id: c.id,
-                              state: "analyzing",
-                            }),
-                          ),
-                        )
-                      }
-                    >
-                      분석 시작
-                    </button>
-                    <button
-                      disabled={busy || c.state === "uploading"}
-                      onClick={() =>
-                        work(async () =>
-                          setCase(
-                            await request("state", {
-                              id: c.id,
-                              state: "needs_material",
-                            }),
-                          ),
-                        )
-                      }
-                    >
-                      추가 자료 필요
-                    </button>
-                  </div>
-                  <p>
-                    Slack 알림:{" "}
-                    {
-                      (
-                        {
-                          sent: "전송 완료",
-                          failed: "전송 실패",
-                          pending: "연결 대기",
-                          unknown: "전송 상태 확인 필요",
-                        } as Record<string, string>
-                      )[c.notification.state]
-                    }
-                  </p>
+              </section>
+              <section className="card">
+                <h2>1. ChatGPT에서 분석하기</h2>
+                <p>
+                  원본 PDF와 분석 요청문을 받아 ChatGPT에 첨부하세요. 분석 후
+                  의견서 PDF와 JSON을 아래에 등록합니다.
+                </p>
+                {c.originals.map((f) => (
                   <button
-                    disabled={
-                      busy ||
-                      c.notification.state === "sent" ||
-                      c.state === "uploading"
-                    }
+                    key={f.name}
+                    disabled={busy || !f.id}
+                    onClick={() => fetchFile(f)}
+                  >
+                    {f.name} 다운로드
+                  </button>
+                ))}
+                <div className="toolbar">
+                  <button
                     onClick={() =>
-                      work(async () => {
-                        await request("notify", { id: c.id });
-                        await load();
-                      })
+                      download(
+                        new Blob([prompt(c)], {
+                          type: "text/plain;charset=utf-8",
+                        }),
+                        "분석요청문.txt",
+                      )
                     }
                   >
-                    Slack 알림 재전송
+                    분석 요청문 다운로드
                   </button>
-                </section>
-                <section className="card">
-                  <h2>1. ChatGPT에서 분석하기</h2>
-                  <p>
-                    원본 PDF와 분석 요청문을 받아 ChatGPT에 첨부하세요. 분석 후
-                    의견서 PDF와 JSON을 아래에 등록합니다.
-                  </p>
-                  {c.originals.map((f) => (
-                    <button
-                      key={f.name}
-                      disabled={busy || !f.id}
-                      onClick={() => fetchFile(f)}
-                    >
-                      {f.name} 다운로드
-                    </button>
-                  ))}
-                  <div className="toolbar">
-                    <button
-                      onClick={() =>
-                        download(
-                          new Blob([prompt(c)], {
-                            type: "text/plain;charset=utf-8",
-                          }),
-                          "분석요청문.txt",
-                        )
-                      }
-                    >
-                      분석 요청문 다운로드
-                    </button>
-                    <button
-                      onClick={() =>
-                        download(
-                          new Blob([JSON.stringify(template(c), null, 2)], {
-                            type: "application/json",
-                          }),
-                          "result-template.json",
-                        )
-                      }
-                    >
-                      JSON 템플릿 다운로드
-                    </button>
-                  </div>
-                </section>
-                <section className="card">
-                  <h2>2. 결과를 확인하고 공개하기</h2>
-                  <label>
-                    결과 PDF
-                    <input
-                      type="file"
-                      accept="application/pdf,.pdf"
-                      disabled={busy}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        setConfirmed(false);
-                        setPdf(null);
-                        if (
-                          f &&
-                          f.size <= 30 * 1024 * 1024 &&
-                          f.size > 0 &&
-                          /\.pdf$/i.test(f.name)
-                        )
-                          setPdf(f);
-                        else setError("결과 PDF는 30MB 이하로 등록하세요.");
-                      }}
-                    />
-                  </label>
-                  <label>
-                    결과 JSON
-                    <input
-                      type="file"
-                      accept="application/json,.json"
-                      disabled={busy}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) void work(() => openJson(f));
-                      }}
-                    />
-                  </label>
-                  {pdfUrl && <iframe title="결과 PDF 미리보기" src={pdfUrl} />}
-                  {preview && <Report r={preview} />}
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={confirmed}
-                      disabled={busy || !pdf || !preview}
-                      onChange={(e) => setConfirmed(e.target.checked)}
-                    />
-                    PDF·JSON 내용과 근거, 법령 최신성을 대조했습니다. 이 결과를
-                    공개합니다.
-                  </label>
                   <button
-                    className="primary"
-                    disabled={busy || !confirmed || !pdf || !json}
-                    onClick={publish}
+                    onClick={() =>
+                      download(
+                        new Blob([JSON.stringify(template(c), null, 2)], {
+                          type: "application/json",
+                        }),
+                        "result-template.json",
+                      )
+                    }
                   >
-                    검토 결과 공개
+                    JSON 템플릿 다운로드
                   </button>
+                </div>
+              </section>
+              <section className="card">
+                <h2>2. 결과를 확인하고 공개하기</h2>
+                <label>
+                  결과 PDF
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    disabled={busy}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      setConfirmed(false);
+                      setPdf(null);
+                      if (
+                        f &&
+                        f.size <= 30 * 1024 * 1024 &&
+                        f.size > 0 &&
+                        /\.pdf$/i.test(f.name)
+                      )
+                        setPdf(f);
+                      else setError("결과 PDF는 30MB 이하로 등록하세요.");
+                    }}
+                  />
+                </label>
+                <label>
+                  결과 JSON
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    disabled={busy}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void work(() => openJson(f));
+                    }}
+                  />
+                </label>
+                {pdfUrl && <iframe title="결과 PDF 미리보기" src={pdfUrl} />}
+                {preview && <Report r={preview} />}
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={confirmed}
+                    disabled={busy || !pdf || !preview}
+                    onChange={(e) => setConfirmed(e.target.checked)}
+                  />
+                  PDF·JSON 내용과 근거, 법령 최신성을 대조했습니다. 이 결과를
+                  공개합니다.
+                </label>
+                <button
+                  className="primary"
+                  disabled={busy || !confirmed || !pdf || !json}
+                  onClick={publish}
+                >
+                  검토 결과 공개
+                </button>
+              </section>
+              {!!c.versions.length && (
+                <section className="card">
+                  <h2>보관된 결과 버전</h2>
+                  {c.versions.map((v, i) => (
+                    <div key={v.id}>
+                      <p>
+                        {i + 1}차 ·{" "}
+                        {new Date(v.publishedAt).toLocaleString("ko-KR")}
+                      </p>
+                      <button disabled={busy} onClick={() => fetchFile(v.pdf)}>
+                        PDF 다운로드
+                      </button>
+                      <button disabled={busy} onClick={() => fetchFile(v.json)}>
+                        JSON 다운로드
+                      </button>
+                    </div>
+                  ))}
                 </section>
-                {!!c.versions.length && (
-                  <section className="card">
-                    <h2>보관된 결과 버전</h2>
-                    {c.versions.map((v, i) => (
-                      <div key={v.id}>
-                        <p>
-                          {i + 1}차 ·{" "}
-                          {new Date(v.publishedAt).toLocaleString("ko-KR")}
-                        </p>
-                        <button
-                          disabled={busy}
-                          onClick={() => fetchFile(v.pdf)}
-                        >
-                          PDF 다운로드
-                        </button>
-                        <button
-                          disabled={busy}
-                          onClick={() => fetchFile(v.json)}
-                        >
-                          JSON 다운로드
-                        </button>
-                      </div>
-                    ))}
-                  </section>
-                )}
-              </>
-            )
-          )}
-        </>
-      )}
+              )}
+            </>
+          )
+        )}
+      </>
       {busy && <p role="status">{message || "처리 중입니다…"}</p>}
       {!busy && message && <p role="status">{message}</p>}
       {error && <p role="alert">{error}</p>}
