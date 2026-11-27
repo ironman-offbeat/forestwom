@@ -84,3 +84,12 @@
 ## 2026-11-27 운영 검증 확인
 
 2026-11-26 실행한 운영 smoke 테스트가 완료됨을 확인했다. 실제 Drive 접수, 원본 해시, 관리자 로그인·상태 변경, PDF/JSON 공개, 익명 결과 조회, PDF 다운로드 해시 일치가 모두 통과했다. 가상 접수번호는 16Bvh2KVdwIcthTbyfVKRBRpBqURE-1-H이며 실제 민원자료를 사용하지 않았다. 11월 27일 Chrome에서 입력 화면과 공개 결과·근거 페이지 표시를 확인했다. Slack은 pending으로, 설치 승인과 실제 전송 검증이 남아 있다.
+
+## Slack 연결 완료 — 2026-11-27
+
+- OFFBEAT 워크스페이스의 slack/forestwom 커넥터를 Forestwom production 환경에 연결했다.
+- SLACK_CONNECTOR 설정 후 운영 재배포 READY 확인.
+- 실제 가상 접수 1GLgGEq2KWrgLrpNKpzYr3Z1EdiBFFnSb를 통해 notification=sent 확인.
+- Slack 검색에서 2026-11-27 09:00:54 KST 소유자 DM의 forestwom 알림 수신을 독립 확인했다. 접수번호·원본 개수·관리자 및 Drive 링크가 일치했다.
+- 동일 요청의 관리자 인증·상태 변경·결과 PDF/JSON 공개·익명 조회·PDF 해시 검증도 모두 통과했다.
+- 최초 설치 승인 단계는 완료되었으며 앱 이용자는 Google/Slack 로그인 없이 요청할 수 있다.
