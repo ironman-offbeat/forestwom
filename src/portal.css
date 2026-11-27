@@ -202,6 +202,43 @@
   padding: 22px 0;
   border-bottom: 1px solid #e5eaf0;
 }
+.portal .report-summary { background: #f0f7f4; border-left: 4px solid #247b60; border-radius: 12px; padding: 20px 24px; }
+.portal .analysis h3 { font-size: 18px; margin: 0 0 12px; }
+.portal .report-counts { display: flex; gap: 10px; flex-wrap: wrap; padding: 0; list-style: none; margin: 24px 0 32px; }
+.portal .report-counts li { background: #f4f6f8; border-radius: 8px; padding: 9px 14px; font-size: 14px; }
+.portal .report-counts strong { margin-left: 8px; }
+.portal .report-findings { list-style: none; padding: 0; margin: 0; }
+.portal .finding-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.portal .finding-heading h4 { display: flex; gap: 12px; margin: 0; font-size: 18px; line-height: 1.6; }
+.portal .finding-number { color: #39816c; font-size: 15px; min-width: 25px; padding-top: 2px; }
+.portal .finding-heading .pill { flex-shrink: 0; }
+.portal .pill.status-action { background: #fff0db; color: #87520e; }
+.portal .pill.status-hold { background: #edf0f7; color: #4d5772; }
+.portal .report-text { font-size: 15px; line-height: 1.85; overflow-wrap: anywhere; }
+.portal .report-text p { margin: 0 0 12px; white-space: pre-wrap; }
+.portal .report-text p:last-child { margin-bottom: 0; }
+.portal .report-text strong { font-weight: 750; color: #173a30; }
+.portal .report-text ul, .portal .report-text ol { padding-left: 25px; margin: 12px 0; }
+.portal .report-text li { padding-left: 5px; margin: 7px 0; }
+.portal .report-text li::marker { color: #32735e; font-weight: 700; }
+.portal .report-text .report-subheading { font-weight: 700; margin-top: 18px; }
+.portal .report-sources { margin: 20px 0 0 12px; }
+.portal .report-sources h5 { font-size: 12px; color: #617369; margin: 0 0 8px; }
+.portal .report-sources blockquote { margin: 8px 0; border-radius: 0 10px 10px 0; }
+.portal .report-sources .report-text { font-size: 13px; color: #53645c; }
+.portal .source-location { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0 0 8px; }
+.portal .source-location span { color: #4c7968; }
+.portal .report-holds { margin-top: 28px; padding: 22px; border-radius: 14px; background: #fff8ed; }
+.portal .report-holds > ul { padding-left: 22px; margin-bottom: 0; }
+.portal .report-holds > ul > li { margin: 12px 0; padding-left: 4px; }
+.portal .report-law { margin-top: 28px; padding-top: 24px; border-top: 1px solid #e5eaf0; }
+@media (max-width: 600px) {
+  .portal .report-summary, .portal .report-holds { padding: 18px 16px; }
+  .portal .finding-heading h4 { font-size: 16px; gap: 8px; }
+  .portal .report-sources { margin-left: 0; }
+  .portal .report-counts { gap: 6px; }
+  .portal .report-counts li { padding: 8px 10px; }
+}
 .portal .analysis p {
   white-space: pre-wrap;
   line-height: 1.8;

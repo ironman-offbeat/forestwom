@@ -1,4 +1,21 @@
 import { test, expect } from "@playwright/test";
+test("result formatting preserves evidence and renders safe readable lists on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/requests", route => route.fulfill({ json: {
+    name: "서식 확인 도면", state: "published", notification: { state: "sent" },
+    result: { summary: "**추가 자료 필요**\n\n수치와 근거를 확인하세요.", reviewer: "담당자", reviewedAt: "2026-11-27",
+      findings: [{ title: "면적 검토", status: "보완", detail: "### 확인 사항\n- **대지면적**: 1,000㎡\n- 조경면적: 160㎡\n\n1. 산출표 확인\n2. 원본 대조\n\n<script>window.bad = true</script>", sources: [{file: "한글도면.pdf", page: 1, quote: "계획 조경면적: 160 m2"}] }],
+      holds: ["배치도 제출"], lawConfirmed: false, lawCheckedAt: "", lawNote: "적용 시점 확인 필요" }
+  }}));
+  await page.goto("/#/result/format-case");
+  await expect(page.locator(".report-summary strong")).toHaveText("추가 자료 필요");
+  await expect(page.locator("article .report-text ul > li")).toHaveCount(2);
+  await expect(page.locator("article .report-text ol > li")).toHaveCount(2);
+  await expect(page.locator(".finding-number")).toHaveText("01");
+  await expect(page.locator(".source-location")).toContainText("PDF 1페이지");
+  await expect(page.locator(".analysis script")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
 test("administrator previews and explicitly publishes matching result files", async ({
   page,
 }) => {
@@ -243,6 +260,7 @@ test("published result renders source pages and holds", async ({ page }) => {
     }),
   );
   await page.goto("/#/result/case_1234567890");
-  await expect(page.getByText("도면.pdf · PDF 2페이지")).toBeVisible();
+  await expect(page.locator(".source-location strong")).toHaveText("도면.pdf");
+  await expect(page.locator(".source-location span")).toHaveText("PDF 2페이지");
   await expect(page.getByText("수목 상세도 보완")).toBeVisible();
 });
