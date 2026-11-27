@@ -17,6 +17,34 @@ export function mockDrive() {
     const u = new URL(url),
       path = u.pathname,
       method = opts.method || "GET";
+    if (
+      path.includes("/upload/") &&
+      method === "POST" &&
+      u.searchParams.get("uploadType") === "resumable"
+    ) {
+      const b = JSON.parse(opts.body),
+        id = `file_${String(++n).padStart(12, "0")}`;
+      db.set(id, {
+        ...b,
+        id,
+        bytes: Buffer.alloc(Number(opts.headers["X-Upload-Content-Length"])),
+        size: 0,
+      });
+      return new Response("{}", {
+        headers: { Location: `https://www.googleapis.com/upload/mock/${id}` },
+      });
+    }
+    if (path.includes("/upload/mock/") && method === "PUT") {
+      const f = db.get(path.split("/").pop()!);
+      const range = opts.headers["Content-Range"].match(
+        /bytes (\d+)-(\d+)\/(\d+)/,
+      );
+      Buffer.from(opts.body).copy(f.bytes, Number(range[1]));
+      if (Number(range[2]) + 1 < Number(range[3]))
+        return new Response(null, { status: 308 });
+      f.size = f.bytes.length;
+      return response({ id: f.id });
+    }
     if (path.includes("/upload/") && method === "PATCH") {
       const f = db.get(path.split("/").pop()!);
       if (

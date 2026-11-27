@@ -1,3 +1,7 @@
+import { validateResult } from "../shared/result-validation.mjs";
+export { validateResult };
+import { validateMaterialItems } from "./materials.mjs";
+import { invalidateItems } from "../shared/review-items.mjs";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { validateWorksheet } from "./worksheet.mjs";
 import { ROOT, cleanName, seal, unseal, driveAction } from "./drive.mjs";
@@ -40,59 +44,6 @@ export function validDescriptors(files, result = false) {
     new Set(files.map((f) => f.name)).size === files.length &&
     files.reduce((s, f) => s + f.size, 0) <= 100 * 1024 * 1024
   );
-}
-export function validateResult(r, record) {
-  if (
-    !r ||
-    r.schemaVersion !== 1 ||
-    r.requestId !== record.id ||
-    !text(r.summary, 10000) ||
-    !r.summary.trim() ||
-    !text(r.reviewer, 200) ||
-    !r.reviewer.trim() ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(r.reviewedAt || "") ||
-    !Array.isArray(r.originals) ||
-    r.originals.length !== record.originals.length ||
-    new Set(r.originals.map((f) => f.name)).size !== r.originals.length ||
-    r.originals.some(
-      (f) =>
-        !record.originals.some((o) => o.name === f.name && o.hash === f.hash),
-    )
-  )
-    fail("결과 JSON의 접수번호·원본 해시·검토자·요약을 확인하세요.");
-  if (
-    !Array.isArray(r.findings) ||
-    r.findings.length > 200 ||
-    !Array.isArray(r.holds) ||
-    r.holds.length > 100 ||
-    r.holds.some((h) => !text(h, 2000)) ||
-    !text(r.lawCheckedAt, 20) ||
-    !text(r.lawNote, 10000) ||
-    typeof r.lawConfirmed !== "boolean"
-  )
-    fail("결과 JSON 항목 형식을 확인하세요.");
-  for (const f of r.findings) {
-    if (
-      !f ||
-      !text(f.title, 300) ||
-      !text(f.detail, 5000) ||
-      !["확인", "보완", "보류"].includes(f.status) ||
-      !Array.isArray(f.sources) ||
-      f.sources.length > 50 ||
-      f.sources.some(
-        (s) =>
-          !record.originals.some((o) => o.name === s.file) ||
-          !Number.isInteger(s.page) ||
-          s.page < 1 ||
-          s.page > 100 ||
-          !text(s.quote, 2000),
-      )
-    )
-      fail("검토 항목의 상태·근거 파일·페이지를 확인하세요.");
-    if (f.status === "확인" && !f.sources.length)
-      fail("확인 항목에는 원본 근거 페이지가 필요합니다.");
-  }
-  return r;
 }
 export function adminSession(cookie, env) {
   try {
@@ -176,6 +127,8 @@ export async function requestAction(
     "publish",
     "health",
     "saveReview",
+    "requestMaterials",
+    "cancelMaterials",
   ];
   if (adminActions.includes(action) && !admin)
     fail("관리자 로그인이 필요합니다.");
@@ -224,11 +177,16 @@ export async function requestAction(
       ? v
       : fail("접수번호가 올바르지 않습니다.");
   async function children(folder) {
-    return (
-      await api(
-        `files?q=${encodeURIComponent(`'${id(folder)}' in parents and trashed=false`)}&pageSize=100&fields=files(id,name,size,mimeType),nextPageToken`,
-      )
-    ).files;
+    const files = [];
+    let cursor;
+    do {
+      const page = await api(
+        `files?q=${encodeURIComponent(`'${id(folder)}' in parents and trashed=false`)}&pageSize=100&fields=files(id,name,size,mimeType),nextPageToken${cursor ? `&pageToken=${encodeURIComponent(cursor)}` : ""}`,
+      );
+      files.push(...page.files);
+      cursor = page.nextPageToken;
+    } while (cursor);
+    return files;
   }
   async function bytes(file, limit = MAX, capture) {
     const meta = await api(`files/${id(file)}?fields=size`);
@@ -264,6 +222,7 @@ export async function requestAction(
         JSON.parse((await bytes(metadata[0].id, 1000000, captured)).toString())
           .signed,
         secret,
+        1000000,
       );
     } catch {
       fail("접수 기록이 변경되었습니다. 관리자 확인이 필요합니다.");
@@ -273,6 +232,9 @@ export async function requestAction(
     return { record, metadata: metadata[0].id, files, etag: captured.etag };
   }
   async function save(record, file, etag) {
+    const payload = JSON.stringify({ signed: seal(record, secret) });
+    if (Buffer.byteLength(payload) > 1000000)
+      fail("접수 기록 크기를 초과했습니다. 검토 메모를 줄여 주세요.");
     const r = await request(
       `https://www.googleapis.com/upload/drive/v3/files/${id(file)}?uploadType=media`,
       {
@@ -282,7 +244,7 @@ export async function requestAction(
           "Content-Type": "application/json",
           ...(etag ? { "If-Match": etag } : {}),
         },
-        body: JSON.stringify({ signed: seal(record, secret) }),
+        body: payload,
       },
     );
     if (r.status === 412)
@@ -366,7 +328,7 @@ export async function requestAction(
   if (action === "upload") {
     const s = unseal(body.session, secret);
     if (
-      !["intake", "result"].includes(s.kind) ||
+      !["intake", "result", "supplement"].includes(s.kind) ||
       !Number.isInteger(body.index) ||
       !s.files[body.index]
     )
@@ -374,6 +336,12 @@ export async function requestAction(
     const { record, files } = await load(s.folder);
     if (s.kind === "intake" && record.state !== "uploading")
       fail("이미 접수된 자료입니다.");
+    if (
+      s.kind === "supplement" &&
+      (record.materialRequests?.at(-1)?.id !== s.materialId ||
+        record.materialRequests.at(-1).state !== "open")
+    )
+      fail("현재 보완 요청의 업로드가 아닙니다.");
     const existing = files.filter((f) => f.name === s.files[body.index].name);
     if (
       existing.length === 1 &&
@@ -430,6 +398,174 @@ export async function requestAction(
     return data;
   }
   const { record, metadata, files, etag } = await load(body.id);
+  if (action === "cancelMaterials") {
+    const material = record.materialRequests?.at(-1);
+    if (
+      !material ||
+      material.id !== body.materialId ||
+      material.state !== "open"
+    )
+      fail("취소할 보완 요청이 없습니다.");
+    if (!text(body.reason, 2000) || !body.reason.trim())
+      fail("취소 사유를 입력하세요.");
+    material.state = "cancelled";
+    material.cancelReason = body.reason;
+    material.cancelledAt = new Date().toISOString();
+    record.state = "analyzing";
+    await save(record, metadata, etag);
+    return record;
+  }
+  if (action === "requestMaterials") {
+    if (record.state === "uploading") fail("접수 완료 후 요청하세요.");
+    if ((record.materialRequests || []).some((r) => r.state === "open"))
+      fail("진행 중인 보완 요청이 있습니다.");
+    if ((record.materialRequests || []).length >= 20)
+      fail("보완 요청은 접수별 최대 20차입니다.");
+    if (
+      !Number.isInteger(body.sourceRevision) ||
+      body.sourceRevision !== (record.sourceRevision || 0)
+    )
+      fail("자료가 변경되었습니다. 접수를 새로 여세요.");
+    const material = {
+      id: randomUUID(),
+      state: "open",
+      createdAt: new Date().toISOString(),
+      items: validateMaterialItems(body.items),
+    };
+    record.materialRequests = [...(record.materialRequests || []), material];
+    record.state = "needs_material";
+    await save(record, metadata, etag);
+    return record;
+  }
+  if (action === "supplementBegin") {
+    const material = record.materialRequests?.at(-1);
+    if (
+      !material ||
+      material.id !== body.materialId ||
+      material.state !== "open" ||
+      record.state !== "needs_material"
+    )
+      fail("진행 중인 보완 요청이 없습니다.");
+    if (
+      !validDescriptors(body.files) ||
+      record.originals.length + body.files.length > 10 ||
+      [...record.originals, ...body.files].reduce((n, f) => n + f.size, 0) >
+        100 * 1024 * 1024
+    )
+      fail("전체 원본은 최대 10개·합계 100MB입니다. PDF 구성을 확인하세요.");
+    const round = randomUUID();
+    return {
+      session: seal(
+        {
+          kind: "supplement",
+          folder: record.id,
+          materialId: material.id,
+          round,
+          sourceRevision: record.sourceRevision || 0,
+          files: body.files.map((f, i) => ({
+            ...f,
+            name: `보완-${round}-${i + 1}-${cleanName(f.name.replace(/\.pdf$/i, "")).slice(0, 80)}.pdf`,
+          })),
+          exp: Date.now() + 3600000,
+        },
+        secret,
+      ),
+    };
+  }
+  if (action === "supplementFinish") {
+    const session = unseal(body.session, secret);
+    if (session.kind !== "supplement" || session.folder !== record.id)
+      fail("보완 제출 세션을 확인하세요.");
+    if (record.submissions?.some((r) => r.id === session.round))
+      return { id: record.id, state: record.state };
+    const material = record.materialRequests?.at(-1);
+    if (
+      !material ||
+      material.id !== session.materialId ||
+      material.state !== "open" ||
+      session.sourceRevision !== (record.sourceRevision || 0)
+    )
+      fail("보완 요청이나 원본이 변경되었습니다.");
+    if (
+      record.originals.length + session.files.length > 10 ||
+      [...record.originals, ...session.files].reduce((n, f) => n + f.size, 0) >
+        100 * 1024 * 1024
+    )
+      fail("전체 원본 크기·개수 제한을 초과했습니다.");
+    const added = await verify(files, session.files);
+    const { PDFDocument } = await import("pdf-lib");
+    const newDocuments = [];
+    for (const asset of added) {
+      const data = await bytes(asset.id);
+      if (hash(data) !== asset.hash) fail("보완 원본이 변경되었습니다.");
+      let pdf;
+      try {
+        pdf = await PDFDocument.load(data);
+      } catch {
+        fail("보완 PDF를 읽을 수 없습니다.");
+      }
+      const pageCount = pdf.getPageCount();
+      if (pageCount < 1 || pageCount > 100)
+        fail("파일당 1~100페이지 PDF를 제출하세요.");
+      newDocuments.push({
+        id: asset.id,
+        name: asset.name,
+        hash: asset.hash,
+        pageCount,
+      });
+    }
+    for (const version of record.versions)
+      version.originals ||= record.originals.map(
+        ({ id, name, hash, pageCount }) => ({ id, name, hash, pageCount }),
+      );
+    record.originals = [...record.originals, ...added];
+    record.sourceRevision = (record.sourceRevision || 0) + 1;
+    record.submissions = [
+      ...(record.submissions || []),
+      {
+        id: session.round,
+        materialId: material.id,
+        submittedAt: new Date().toISOString(),
+        files: added,
+      },
+    ];
+    material.state = "submitted";
+    record.state = "analyzing";
+    if (record.review) {
+      const draft = record.review.draft;
+      draft.documents.push(...newDocuments);
+      for (const e of Object.values(draft.entries)) e.confirmed = false;
+      for (const f of Object.values(draft.info))
+        if (f.status === "confirmed") f.status = "candidate";
+      draft.gates = {
+        ...draft.gates,
+        scope: false,
+        law: false,
+        conflicts: false,
+      };
+      draft.items = invalidateItems(draft.items);
+      draft.history = [
+        ...draft.history,
+        "보완 자료 제출: 원본·사건 정보·적용 기준을 다시 확인하세요.",
+      ].slice(-100);
+      record.review.revision++;
+      record.review.savedAt = new Date().toISOString();
+    }
+    record.notificationId = randomUUID();
+    record.notification = { state: "pending" };
+    await save(record, metadata, etag);
+    const notification = await sendNotification(record, env, request);
+    try {
+      const latest = await load(record.id);
+      if (latest.record.notificationId === record.notificationId) {
+        latest.record.notification = notification;
+        await save(latest.record, latest.metadata, latest.etag);
+      }
+    } catch {
+      /* The submission is already saved; administrators can retry the notification. */
+    }
+    return { id: record.id, state: record.state };
+  }
   if (action === "get") {
     if (record.state === "uploading") fail("아직 접수가 완료되지 않았습니다.");
     const version = record.versions.find((v) => v.id === record.published);
@@ -438,7 +574,10 @@ export async function requestAction(
       const b = await bytes(version.json.id, 1000000);
       if (hash(b) !== version.json.hash)
         fail("공개 결과가 변경되었습니다. 관리자에게 문의하세요.");
-      result = validateResult(JSON.parse(b.toString()), record);
+      result = validateResult(JSON.parse(b.toString()), {
+        ...record,
+        originals: version.originals || record.originals,
+      });
     }
     return {
       id: record.id,
@@ -449,6 +588,12 @@ export async function requestAction(
       result,
       version: version?.id,
       pdf: version?.pdf,
+      resultIsPrevious: !!version && record.state !== "published",
+      materialRequests: record.materialRequests || [],
+      submissions: (record.submissions || []).map(({ files, ...r }) => ({
+        ...r,
+        files: files.map((f) => ({ name: f.name })),
+      })),
     };
   }
   if (action === "saveReview") {
@@ -482,6 +627,7 @@ export async function requestAction(
       originals.push({ ...original, pageCount });
     }
     const draft = validateWorksheet(body.draft, originals);
+    record.originals = originals;
     record.review = {
       revision: body.revision + 1,
       savedAt: new Date().toISOString(),
@@ -493,12 +639,17 @@ export async function requestAction(
   if (action === "detail") return record;
   if (action === "state") {
     if (
+      body.state === "analyzing" &&
+      record.materialRequests?.some((r) => r.state === "open")
+    )
+      fail("진행 중인 보완 요청을 제출 또는 취소한 후 분석을 시작하세요.");
+    if (
       !["analyzing", "needs_material"].includes(body.state) ||
       record.state === "uploading"
     )
       fail("변경할 수 없는 상태입니다.");
     record.state = body.state;
-    await save(record, metadata);
+    await save(record, metadata, etag);
     return record;
   }
   if (action === "notify") {
@@ -506,18 +657,27 @@ export async function requestAction(
       fail("접수 완료 후 알림을 보낼 수 있습니다.");
     if (record.notification.state !== "sent") {
       record.notification = await sendNotification(record, env, request);
-      await save(record, metadata);
+      await save(record, metadata, etag);
     }
     return record.notification;
   }
   if (action === "resultBegin") {
+    if (record.materialRequests?.some((r) => r.state === "open"))
+      fail("진행 중인 보완 요청을 먼저 처리하세요.");
     if (record.state === "uploading" || !validDescriptors(body.files, true))
       fail("결과 PDF와 JSON 파일을 확인하세요.");
+    if (
+      body.reviewRevision !== undefined &&
+      body.reviewRevision !== record.review?.revision
+    )
+      fail("검토표가 변경되었습니다. 다시 미리보기 하세요.");
     const version = randomUUID();
     return {
       session: seal(
         {
           kind: "result",
+          reviewRevision: body.reviewRevision,
+          sourceRevision: record.sourceRevision || 0,
           folder: record.id,
           version,
           files: body.files.map((f) => ({
@@ -531,6 +691,8 @@ export async function requestAction(
     };
   }
   if (action === "publish") {
+    if (record.materialRequests?.some((r) => r.state === "open"))
+      fail("진행 중인 보완 요청을 먼저 처리하세요.");
     const s = unseal(body.session, secret);
     if (
       s.kind !== "result" ||
@@ -539,33 +701,55 @@ export async function requestAction(
     )
       fail("담당자 결과 확인이 필요합니다.");
     if (record.versions.some((v) => v.id === s.version)) return record;
+    if (
+      (s.sourceRevision ?? 0) !== (record.sourceRevision || 0) ||
+      (s.reviewRevision !== undefined &&
+        s.reviewRevision !== record.review?.revision)
+    )
+      fail("원본 또는 검토표가 변경되었습니다. 결과를 다시 준비하세요.");
     await verify(files, record.originals);
     const uploaded = await verify(files, s.files);
     const result = validateResult(
       JSON.parse((await bytes(uploaded[1].id, 1000000)).toString()),
       record,
+      new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(
+        new Date(),
+      ),
     );
     if (
       !result.lawConfirmed ||
       !/^\d{4}-\d{2}-\d{2}$/.test(result.lawCheckedAt) ||
+      !Number.isFinite(Date.parse(result.lawCheckedAt)) ||
+      new Date(result.lawCheckedAt).toISOString().slice(0, 10) !==
+        result.lawCheckedAt ||
       !result.lawNote.trim()
     )
       fail("법령 최신성 확인일과 확인 기록이 필요합니다.");
     const age =
-      Date.now() - Date.parse(result.lawCheckedAt + "T00:00:00+09:00");
-    if (!Number.isFinite(age) || age < 0 || age > 31 * 86400000)
+      Date.parse(
+        new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(
+          new Date(),
+        ),
+      ) - Date.parse(result.lawCheckedAt);
+    if (!Number.isFinite(age) || age < 0 || age > 30 * 86400000)
       fail("법령 확인일은 미래가 아닌 최근 30일 이내여야 합니다.");
     if (record.versions.length >= 30)
       fail("결과 버전은 최대 30개까지 보관합니다.");
     record.versions.push({
       id: s.version,
+      originals: record.originals.map(({ id, name, hash, pageCount }) => ({
+        id,
+        name,
+        hash,
+        pageCount,
+      })),
       pdf: uploaded[0],
       json: uploaded[1],
       publishedAt: new Date().toISOString(),
     });
     record.published = s.version;
     record.state = "published";
-    await save(record, metadata);
+    await save(record, metadata, etag);
     return record;
   }
   if (action === "read") {

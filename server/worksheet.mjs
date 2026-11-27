@@ -1,3 +1,4 @@
+import { validateItems } from "../shared/review-items.mjs";
 const keys = [
   "site",
   "gross",
@@ -113,6 +114,47 @@ export function validateWorksheet(draft, originals) {
     !str(g.lawNote, 10000)
   )
     fail();
+  const today = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Seoul",
+  }).format(new Date());
+  const validDate = (value) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    Number.isFinite(Date.parse(value)) &&
+    new Date(value).toISOString().slice(0, 10) === value;
+  const lawAge = (Date.parse(today) - Date.parse(g.lawDate)) / 86400000;
+  const values = Object.fromEntries(
+    keys.map((k) => [k, Number(entries[k].value.replaceAll(",", ""))]),
+  );
+  const items =
+    draft.items === undefined
+      ? undefined
+      : validateItems(draft.items, documents, g.basisDate);
+  if (
+    items?.some((item) => item.status !== "판단 보류") &&
+    (facts.some((k) => info[k].status !== "confirmed") ||
+      info.jurisdiction.value.trim() !== "성남시" ||
+      !g.scope ||
+      !g.law ||
+      !g.conflicts ||
+      !validDate(info.applicationDate.value) ||
+      info.applicationDate.value > today ||
+      !validDate(g.basisDate) ||
+      g.basisDate < "2025-03-10" ||
+      g.basisDate > today ||
+      !validDate(g.lawDate) ||
+      lawAge < 0 ||
+      lawAge > 30 ||
+      !g.lawNote.trim() ||
+      values.site < 300 ||
+      values.gross <= 0 ||
+      values.roof > 0 ||
+      values.wall > 0 ||
+      values.landscape > values.site ||
+      values.planting > values.landscape ||
+      values.natural > values.landscape ||
+      keys.some((k) => !entries[k].confirmed))
+  )
+    throw Error("항목 판정 전에 사건 정보·수치·적용 기준 확인을 완료하세요.");
   return {
     schemaVersion: 1,
     ruleVersion: draft.ruleVersion,
@@ -130,5 +172,6 @@ export function validateWorksheet(draft, originals) {
     reviewer: draft.reviewer,
     remarks: draft.remarks,
     history: draft.history,
+    ...(draft.items !== undefined ? { items } : {}),
   };
 }

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mockDrive } from "../helpers/request-drive";
 // @ts-ignore native server module
@@ -191,4 +191,135 @@ test("stale save retains local edits and shows a conflict", async ({
   await expect(page.getByLabel("소재지", { exact: true })).toHaveValue(
     "보존할 편집값",
   );
+});
+
+test("structured law decision → shared PDF and JSON → publication uses saved worksheet", async ({
+  page,
+}) => {
+  const { id, call, m } = await setup(page);
+  await page.goto(`/#/case-review/${id}`);
+  await expect(
+    page.getByRole("button", { name: "사건 검토표 저장" }),
+  ).toBeEnabled();
+  await fillCase(page);
+  await page.getByLabel("검토자", { exact: true }).fill("가상 검토 담당자");
+  await page
+    .getByRole("button", { name: "검토 항목 추가", exact: true })
+    .click();
+  const item = page.getByRole("article", { name: "검토 항목 1", exact: true });
+  await item
+    .getByLabel("항목 제목", { exact: true })
+    .fill("조경면적 법규 대조");
+  await item.getByLabel("법령명", { exact: true }).fill("성남시 건축 조례");
+  await item.getByLabel("조·항·호", { exact: true }).fill("제19조 제1항");
+  await item.getByLabel("시행일", { exact: true }).fill("2025-03-10");
+  await item
+    .getByLabel("원문 확인일", { exact: true })
+    .fill(
+      new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(
+        new Date(),
+      ),
+    );
+  await item
+    .getByLabel("공식 원문 링크", { exact: true })
+    .fill("https://www.law.go.kr/ordinInfoP.do?ordinSeq=2019919");
+  await item
+    .getByLabel("사건 적용·제외 사유", { exact: true })
+    .fill("가상 시험의 일반 건축물 적용 가정");
+  await item
+    .getByLabel("판정 근거·계산 설명", { exact: true })
+    .fill("필요 150㎡, 계획 160㎡를 대조함");
+  await item.getByRole("button", { name: "도면 근거 추가" }).click();
+  await item
+    .getByLabel("도면 인용", { exact: true })
+    .fill("Landscape area: 160 m2");
+  await item
+    .getByLabel("항목 1 판정", { exact: true })
+    .selectOption("기준 충족");
+  await page.getByRole("button", { name: "사건 검토표 저장" }).click();
+  await expect(page.getByText(/검토표 저장 완료/)).toBeVisible();
+  await page.getByRole("button", { name: "미리보기 PDF 생성" }).click();
+  await expect(page.getByTitle("생성된 의견서 PDF")).toBeVisible();
+  await page
+    .getByLabel(
+      "도면 근거·적용 법령·PDF와 화면 내용을 대조했고 이 결과를 공개합니다.",
+    )
+    .check();
+  await page
+    .getByRole("button", { name: "검토표 결과 공개", exact: true })
+    .click();
+  await expect(
+    page.getByText("검토 결과가 공개되었습니다.", { exact: true }),
+  ).toBeVisible();
+  const published = await call("get");
+  expect(published.result.findings).toHaveLength(4);
+  expect(published.result.findings[3].detail).toContain("제19조 제1항");
+  const record = await call("detail");
+  expect(record.versions).toHaveLength(1);
+  writeFileSync(
+    "test-results/generated-case-report.pdf",
+    m.db.get(record.versions[0].pdf.id).bytes,
+  );
+  writeFileSync(
+    "test-results/generated-case-result.json",
+    m.db.get(record.versions[0].json.id).bytes,
+  );
+  await page.goto(`/#/result/${id}`);
+  await expect(
+    page.getByRole("heading", { name: /조경면적 법규 대조/ }),
+  ).toBeVisible();
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({path:"test-results/published-worksheet-mobile.png",fullPage:true});
+});
+
+test("request materials → submit on same result link → retain originals and reopen held review", async ({
+  page,
+}) => {
+  const { id, call } = await setup(page);
+  await page.goto(`/#/case-review/${id}`);
+  await expect(
+    page.getByRole("button", { name: "사건 검토표 저장" }),
+  ).toBeEnabled();
+  await fillCase(page);
+  await page.getByRole("button", { name: "사건 검토표 저장" }).click();
+  await expect(page.getByText(/검토표 저장 완료/)).toBeVisible();
+  await page.goto(`/#/admin/${id}`);
+  await page.getByLabel("보완 제목", { exact: true }).fill("배치도 보완");
+  await page.getByLabel("요청 사유", { exact: true }).fill("배치 치수 누락");
+  await page
+    .getByLabel("필요 자료", { exact: true })
+    .fill("치수가 포함된 수정 배치도");
+  await page
+    .getByRole("button", { name: "보완 요청 게시", exact: true })
+    .click();
+  await expect(
+    page.getByText("1차 보완 요청 · 자료 제출 대기", { exact: true }),
+  ).toBeVisible();
+  await page.goto(`/#/result/${id}`);
+  await expect(
+    page.getByText("필요 자료: 치수가 포함된 수정 배치도", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByLabel("보완 PDF", { exact: true })
+    .setInputFiles("public/samples/normal.pdf");
+  await page
+    .getByRole("button", { name: "보완 자료 제출하기", exact: true })
+    .click();
+  await expect(
+    page.getByText("1차 보완 요청 · 자료 제출 완료·재검토 필요", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  const c = await call("detail");
+  expect(c.originals).toHaveLength(2);
+  expect(c.review.draft.entries.site.confirmed).toBe(false);
+  await page.goto(`/#/case-review/${id}`);
+  await expect(
+    page.getByText("저장된 검토표와 원본을 불러왔습니다."),
+  ).toBeVisible();
+  await expect(page.locator(".report-status")).toContainText("검토 보류");
+  await expect(
+    page.getByLabel("대지면적 후보", { exact: true }).locator("option"),
+  ).toHaveCount(3);
 });

@@ -1,3 +1,11 @@
+import PublishWorksheet from "./PublishWorksheet";
+import { worksheetResult } from "./worksheet-result";
+import {
+  invalidateItems,
+  validateItems,
+  type ReviewItem,
+} from "../shared/review-items.mjs";
+import ReviewItems, { ReviewItemsReport } from "./ReviewItems";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   emptyEntries,
@@ -91,12 +99,14 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
   const [showSaved, setShowSaved] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | undefined>();
   const [openId, setOpenId] = useState("");
+  const [items, setItems] = useState<ReviewItem[]>([]);
   const [caseInfo, setCaseInfo] = useState(emptyCaseInfo);
   const [revision, setRevision] = useState(linkedCase?.review?.revision || 0);
   const [loaded, setLoaded] = useState(!linkedCase);
   const [savedContent, setSavedContent] = useState("");
   const content = JSON.stringify({
     caseInfo,
+    items,
     entries,
     gates,
     reviewer,
@@ -168,6 +178,7 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
         if (cancelled) return;
         const next = {
           caseInfo: draft?.info || emptyCaseInfo(),
+          items: draft?.items || [],
           entries: draft?.entries || emptyEntries(),
           gates: draft?.gates || emptyGates(),
           reviewer: draft?.reviewer || "",
@@ -176,6 +187,7 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
         };
         setDocs(restored);
         setCaseInfo(next.caseInfo);
+        setItems(next.items);
         setEntries(next.entries);
         setGates(next.gates);
         setReviewer(next.reviewer);
@@ -228,6 +240,11 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
         reviewer,
         remarks,
         history: history.slice(-100),
+        items: validateItems(
+          items,
+          docs.map((d) => ({ id: d.id, pageCount: d.pages.length })),
+          gates.basisDate,
+        ),
       };
       const saved = await request<SavedWorksheet>("saveReview", {
         id: linkedCase.id,
@@ -278,6 +295,36 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
         ],
       }
     : computed;
+  let publicResult = null;
+  let publicError = "";
+  if (linkedCase && loaded && !dirty && revision > 0) {
+    try {
+      publicResult = worksheetResult(
+        linkedCase,
+        {
+          schemaVersion: 1,
+          ruleVersion: RULE_VERSION,
+          info: caseInfo,
+          documents: docs.map((d) => ({
+            id: d.id,
+            name: d.name,
+            hash: linkedCase.originals.find((o) => o.id === d.id)!.hash,
+            pageCount: d.pages.length,
+          })),
+          entries,
+          gates,
+          reviewer,
+          remarks,
+          history,
+          items,
+        },
+        pages,
+        revision,
+      );
+    } catch (e) {
+      publicError = (e as Error).message;
+    }
+  }
   const confirmed = fields.filter(([k]) => entries[k].confirmed).length;
   useEffect(() => {
     let cancelled = false,
@@ -311,6 +358,7 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
     };
   }, [docs, selected, zoom]);
   function change(k: Key, patch: Partial<Entry>) {
+    setItems(invalidateItems);
     setApproved("");
     setEntries((prev) => ({
       ...prev,
@@ -318,6 +366,7 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
     }));
   }
   function gate(patch: Partial<Gates>) {
+    setItems(invalidateItems);
     setGates((prev) => ({ ...prev, ...patch }));
     setApproved("");
   }
@@ -672,6 +721,7 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
               <CaseInfoForm
                 value={caseInfo}
                 onChange={(key, fact) => {
+                  setItems(invalidateItems);
                   setCaseInfo((prev) => ({ ...prev, [key]: fact }));
                   setGates((prev) => ({
                     ...prev,
@@ -1124,6 +1174,22 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
               구분했습니다.
             </label>
           </section>
+          {linkedCase && (
+            <ReviewItems
+              items={items}
+              documents={docs.map((d) => ({
+                id: d.id,
+                name: d.name,
+                hash: linkedCase.originals.find((o) => o.id === d.id)!.hash,
+                pageCount: d.pages.length,
+              }))}
+              canDecide={!result.holds.length}
+              onChange={(next) => {
+                setItems(next);
+                setApproved("");
+              }}
+            />
+          )}
           <section id="report" className="panel report">
             <div className="section-title">
               <div>
@@ -1175,6 +1241,17 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
                   ))}
                 </dl>
               </>
+            )}
+            {linkedCase && (
+              <ReviewItemsReport
+                items={items}
+                documents={docs.map((d) => ({
+                  id: d.id,
+                  name: d.name,
+                  hash: linkedCase.originals.find((o) => o.id === d.id)!.hash,
+                  pageCount: d.pages.length,
+                }))}
+              />
             )}
             <h3>1. 제출자료 판독 현황</h3>
             {pages.length ? (
@@ -1361,6 +1438,17 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
               <p>확정 기록 없음</p>
             )}
           </section>
+          {linkedCase && publicResult && (
+            <PublishWorksheet
+              key={`${revision}-${content}`}
+              analysis={publicResult}
+              revision={revision}
+              blocked={
+                !!linkedCase.materialRequests?.some((r) => r.state === "open")
+              }
+            />
+          )}
+          {linkedCase && publicError && <p>{publicError}</p>}
           <footer>
             Forestwom · 선택한 도면과 검토 기록은 저장 버튼을 누를 때 Google
             Drive로 전송됩니다.

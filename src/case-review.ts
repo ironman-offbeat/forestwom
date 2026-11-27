@@ -1,3 +1,4 @@
+import { invalidateItems, type ReviewItem } from "../shared/review-items.mjs";
 import {
   fields,
   RULE_VERSION,
@@ -32,6 +33,7 @@ export const emptyCaseInfo = (): CaseInfo =>
     ]),
   ) as CaseInfo;
 export type Worksheet = {
+  items?: ReviewItem[];
   schemaVersion: 1;
   ruleVersion: string;
   info: CaseInfo;
@@ -89,6 +91,7 @@ export function restoreWorksheet(
   if (draft.ruleVersion === RULE_VERSION) return draft;
   return {
     ...draft,
+    items: invalidateItems(draft.items),
     entries: Object.fromEntries(
       fields.map(([k]) => [k, { ...draft.entries[k], confirmed: false }]),
     ) as Entries,

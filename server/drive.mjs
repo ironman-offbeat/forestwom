@@ -24,8 +24,8 @@ export function seal(value, secret) {
     body + "." + createHmac("sha256", secret).update(body).digest("base64url")
   );
 }
-export function unseal(value, secret) {
-  if (typeof value !== "string" || value.length > 10000)
+export function unseal(value, secret, maxLength = 10000) {
+  if (typeof value !== "string" || value.length > maxLength)
     throw new Error("저장 세션이 올바르지 않습니다.");
   const [body, mac] = value.split(".");
   const expected = createHmac("sha256", secret)

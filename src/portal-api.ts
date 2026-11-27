@@ -1,3 +1,4 @@
+import type { ReviewItem } from "../shared/review-items.mjs";
 import type { SavedWorksheet } from "./case-review";
 import { sha256 } from "./storage";
 export type Asset = {
@@ -8,6 +9,9 @@ export type Asset = {
   hash: string;
 };
 export type Analysis = {
+  basisDate?: string;
+  ruleVersion?: string;
+  worksheetRevision?: number;
   schemaVersion: 1;
   requestId: string;
   reviewer: string;
@@ -15,6 +19,9 @@ export type Analysis = {
   summary: string;
   originals: { name: string; hash: string }[];
   findings: {
+    decision?: ReviewItem["status"];
+    nextAction?: string;
+    law?: ReviewItem["law"];
     title: string;
     status: string;
     detail: string;
@@ -25,7 +32,27 @@ export type Analysis = {
   lawCheckedAt: string;
   lawNote: string;
 };
+export type MaterialRequest = {
+  id: string;
+  state: "open" | "submitted" | "cancelled";
+  cancelReason?: string;
+  createdAt: string;
+  items: {
+    title: string;
+    reason: string;
+    requested: string;
+    reference: string;
+  }[];
+};
 export type CaseRecord = {
+  sourceRevision?: number;
+  materialRequests?: MaterialRequest[];
+  submissions?: {
+    id: string;
+    materialId: string;
+    submittedAt: string;
+    files: Asset[];
+  }[];
   review?: SavedWorksheet;
   id: string;
   name: string;

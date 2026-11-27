@@ -48,6 +48,8 @@ describe("request boundaries", () => {
       "resultBegin",
       "publish",
       "saveReview",
+      "requestMaterials",
+      "cancelMaterials",
     ])
       await expect(
         requestAction(
