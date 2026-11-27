@@ -1,4 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { validateWorksheet } from "./worksheet.mjs";
 import { ROOT, cleanName, seal, unseal, driveAction } from "./drive.mjs";
 
 const SITE = "https://forestwom.2hayoung.com";
@@ -174,6 +175,7 @@ export async function requestAction(
     "resultBegin",
     "publish",
     "health",
+    "saveReview",
   ];
   if (adminActions.includes(action) && !admin)
     fail("관리자 로그인이 필요합니다.");
@@ -228,7 +230,7 @@ export async function requestAction(
       )
     ).files;
   }
-  async function bytes(file, limit = MAX) {
+  async function bytes(file, limit = MAX, capture) {
     const meta = await api(`files/${id(file)}?fields=size`);
     if (!Number(meta.size) || Number(meta.size) > limit)
       fail("파일 크기를 확인하세요.");
@@ -237,6 +239,7 @@ export async function requestAction(
       { headers },
     );
     if (!r.ok) fail("파일 읽기 실패");
+    if (capture) capture.etag = r.headers.get("etag");
     const b = Buffer.from(await r.arrayBuffer());
     if (b.length !== Number(meta.size)) fail("파일 크기가 변경되었습니다.");
     return b;
@@ -255,9 +258,11 @@ export async function requestAction(
       metadata = files.filter((f) => f.name === "request.signed.json");
     if (metadata.length !== 1) fail("접수 기록을 확인할 수 없습니다.");
     let record;
+    const captured = {};
     try {
       record = unseal(
-        JSON.parse((await bytes(metadata[0].id, 1000000)).toString()).signed,
+        JSON.parse((await bytes(metadata[0].id, 1000000, captured)).toString())
+          .signed,
         secret,
       );
     } catch {
@@ -265,17 +270,25 @@ export async function requestAction(
     }
     if (record.id !== folder || record.kind !== "request")
       fail("접수 기록이 일치하지 않습니다.");
-    return { record, metadata: metadata[0].id, files };
+    return { record, metadata: metadata[0].id, files, etag: captured.etag };
   }
-  async function save(record, file) {
+  async function save(record, file, etag) {
     const r = await request(
       `https://www.googleapis.com/upload/drive/v3/files/${id(file)}?uploadType=media`,
       {
         method: "PATCH",
-        headers: { ...headers, "Content-Type": "application/json" },
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+          ...(etag ? { "If-Match": etag } : {}),
+        },
         body: JSON.stringify({ signed: seal(record, secret) }),
       },
     );
+    if (r.status === 412)
+      fail(
+        "다른 작업에서 접수가 변경되었습니다. 새로 열어 변경 내용을 확인하세요.",
+      );
     if (!r.ok) fail("접수 상태 저장 실패. 새로고침 후 상태를 확인하세요.");
   }
   async function signedFile(record) {
@@ -416,7 +429,7 @@ export async function requestAction(
     );
     return data;
   }
-  const { record, metadata, files } = await load(body.id);
+  const { record, metadata, files, etag } = await load(body.id);
   if (action === "get") {
     if (record.state === "uploading") fail("아직 접수가 완료되지 않았습니다.");
     const version = record.versions.find((v) => v.id === record.published);
@@ -437,6 +450,45 @@ export async function requestAction(
       version: version?.id,
       pdf: version?.pdf,
     };
+  }
+  if (action === "saveReview") {
+    if (record.state === "uploading")
+      fail("접수 완료 후 검토표를 저장할 수 있습니다.");
+    if (
+      !Number.isInteger(body.revision) ||
+      body.revision !== (record.review?.revision || 0)
+    )
+      fail(
+        "다른 작업에서 검토표가 변경되었습니다. 새로 열어 변경 내용을 확인하세요.",
+      );
+    // Check the actual source bytes, not a page count supplied by the browser.
+    const { PDFDocument } = await import("pdf-lib");
+    const originals = [];
+    for (const original of record.originals) {
+      const b = await bytes(original.id);
+      if (hash(b) !== original.hash)
+        fail("원본 파일이 변경되었습니다. 검토표 저장을 중단했습니다.");
+      let pdf;
+      try {
+        pdf = await PDFDocument.load(b);
+      } catch {
+        fail(
+          "원본 PDF 페이지를 확인하지 못했습니다. 검토표 저장을 중단했습니다.",
+        );
+      }
+      const pageCount = pdf.getPageCount();
+      if (pageCount < 1 || pageCount > 100)
+        fail("원본은 파일당 1~100페이지여야 합니다.");
+      originals.push({ ...original, pageCount });
+    }
+    const draft = validateWorksheet(body.draft, originals);
+    record.review = {
+      revision: body.revision + 1,
+      savedAt: new Date().toISOString(),
+      draft,
+    };
+    await save(record, metadata, etag);
+    return record.review;
   }
   if (action === "detail") return record;
   if (action === "state") {

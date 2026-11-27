@@ -1,3 +1,4 @@
+import type { SavedWorksheet } from "./case-review";
 import { sha256 } from "./storage";
 export type Asset = {
   id: string;
@@ -25,6 +26,7 @@ export type Analysis = {
   lawNote: string;
 };
 export type CaseRecord = {
+  review?: SavedWorksheet;
   id: string;
   name: string;
   note: string;

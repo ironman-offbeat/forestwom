@@ -15,6 +15,7 @@ import {
 import { folderUrl } from "./storage";
 import "./portal.css";
 import { ReportText } from "./ReportText";
+const CaseReview = lazy(() => import("./CaseReview"));
 const Review = lazy(() => import("./App"));
 function Report({ r }: { r: Analysis }) {
   return (
@@ -70,6 +71,8 @@ export default function Portal() {
     return () => removeEventListener("hashchange", change);
   }, []);
   const parts = route.replace(/^#\/?/, "").split("/");
+  if (parts[0] === "case-review" && parts[1])
+    return <Suspense fallback={<p>검토표를 여는 중입니다.</p>}><CaseReview key={parts[1]} id={parts[1]} /></Suspense>;
   if (parts[0] === "review")
     return (
       <Suspense fallback={<p>검토 도구를 여는 중입니다.</p>}>
@@ -487,6 +490,7 @@ function Admin({ id }: { id?: string }) {
               <section className="card">
                 <span className="pill">{states[c.state]}</span>
                 <p>접수번호: {c.id}</p>
+                {c.state !== "uploading" && <p><a className="button" href={`#/case-review/${c.id}`}>사건 검토표 열기</a></p>}
                 <p>{c.note || "요청 메모 없음"}</p>
                 <a href={`#/result/${c.id}`}>결과 페이지 열기 ↗</a>
                 <div className="toolbar">

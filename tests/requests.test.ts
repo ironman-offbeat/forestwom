@@ -1,3 +1,4 @@
+import { mockDrive } from "./helpers/request-drive";
 import { describe, it, expect } from "vitest";
 // @ts-ignore server module is intentionally native ESM.
 import {
@@ -25,59 +26,6 @@ const descriptor = {
   type: "application/pdf",
   hash: sha(pdf),
 };
-function mockDrive() {
-  let n = 0;
-  const db = new Map<string, any>();
-  let slack = 0;
-  const response = (data: any, status = 200) =>
-    new Response(JSON.stringify(data), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    });
-  const fetcher = async (url: string, opts: any = {}) => {
-    if (url.includes("oauth2.googleapis.com"))
-      return response({ access_token: "token" });
-    if (url.includes("slack.com")) {
-      slack++;
-      return response({ ok: false, error: "invalid_auth" });
-    }
-    const u = new URL(url),
-      path = u.pathname,
-      method = opts.method || "GET";
-    if (path.includes("/upload/") && method === "PATCH") {
-      const f = db.get(path.split("/").pop()!);
-      f.bytes = Buffer.from(opts.body);
-      f.size = f.bytes.length;
-      return response({ id: f.id });
-    }
-    if (path.endsWith("/files") && method === "POST") {
-      const b = JSON.parse(opts.body),
-        id = `file_${String(++n).padStart(12, "0")}`;
-      db.set(id, { ...b, id, bytes: Buffer.alloc(0), size: 0 });
-      return response({ id });
-    }
-    if (path.endsWith("/files")) {
-      const parent = u.searchParams
-        .get("q")
-        ?.match(/'([^']+)' in parents/)?.[1];
-      return response({
-        files: [...db.values()]
-          .filter((f) => f.parents?.includes(parent))
-          .map(({ bytes, ...f }) => f),
-      });
-    }
-    const f = db.get(path.split("/").pop()!);
-    if (!f) return response({}, 404);
-    if (u.searchParams.get("alt") === "media") return new Response(f.bytes);
-    return response(f);
-  };
-  const add = (folder: string, f: any, b: Buffer) => {
-    const id = `file_${String(++n).padStart(12, "0")}`;
-    db.set(id, { ...f, id, parents: [folder], bytes: b, size: b.length });
-    return id;
-  };
-  return { db, fetcher, add, slack: () => slack };
-}
 describe("request boundaries", () => {
   it("requires strong administrator key and verifies cookie signature and expiry", () => {
     const token = login(env.ADMIN_KEY, env);
@@ -99,6 +47,7 @@ describe("request boundaries", () => {
       "notify",
       "resultBegin",
       "publish",
+      "saveReview",
     ])
       await expect(
         requestAction(
