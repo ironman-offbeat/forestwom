@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+test.beforeEach(async ({page})=>{await page.route("**/api/requests",route=>route.fulfill({json:{admin:true}}));});
 const labels = [
   "대지면적",
   "연면적",

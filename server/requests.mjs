@@ -1,3 +1,4 @@
+import { reviewerLink } from "./access.mjs";
 import { validateResult } from "../shared/result-validation.mjs";
 export { validateResult };
 import { validateMaterialItems } from "./materials.mjs";
@@ -90,7 +91,7 @@ export async function sendNotification(record, env, request = fetch) {
       body: JSON.stringify({
         channel: "U0AF5B880F3",
         client_msg_id: record.notificationId,
-        text: `Forestwom 검토 요청\n도면: ${record.name}\n접수번호: ${record.id}\n원본: ${record.originals.length}개\n관리자: ${SITE}/#/admin/${record.id}\n저장소: https://drive.google.com/drive/folders/${record.id}`,
+        text: `Forestwom 검토 요청\n도면: ${record.name}\n접수번호: ${record.id}\n원본: ${record.originals.length}개\n관리자: ${reviewerLink(record.id, env.ADMIN_KEY)}\n저장소: https://drive.google.com/drive/folders/${record.id}`,
         mrkdwn: false,
         unfurl_links: false,
         unfurl_media: false,
@@ -662,13 +663,18 @@ export async function requestAction(
     return record.notification;
   }
   if (action === "resultBegin") {
+    if (
+      body.sourceRevision !== undefined &&
+      body.sourceRevision !== (record.sourceRevision || 0)
+    )
+      fail("원본이 변경되었습니다. 최신 자료로 다시 분석하세요.");
     if (record.materialRequests?.some((r) => r.state === "open"))
       fail("진행 중인 보완 요청을 먼저 처리하세요.");
     if (record.state === "uploading" || !validDescriptors(body.files, true))
       fail("결과 PDF와 JSON 파일을 확인하세요.");
     if (
       body.reviewRevision !== undefined &&
-      body.reviewRevision !== record.review?.revision
+      body.reviewRevision !== (record.review?.revision || 0)
     )
       fail("검토표가 변경되었습니다. 다시 미리보기 하세요.");
     const version = randomUUID();
@@ -704,7 +710,7 @@ export async function requestAction(
     if (
       (s.sourceRevision ?? 0) !== (record.sourceRevision || 0) ||
       (s.reviewRevision !== undefined &&
-        s.reviewRevision !== record.review?.revision)
+        s.reviewRevision !== (record.review?.revision || 0))
     )
       fail("원본 또는 검토표가 변경되었습니다. 결과를 다시 준비하세요.");
     await verify(files, record.originals);

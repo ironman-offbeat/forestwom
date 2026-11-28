@@ -11,10 +11,14 @@ export default function PublishWorksheet({
   analysis,
   revision,
   blocked,
+  sourceRevision,
+  onPublished,
 }: {
   analysis: Analysis;
   revision: number;
   blocked: boolean;
+  sourceRevision?: number;
+  onPublished?: () => void;
 }) {
   const preview = useRef<HTMLDivElement>(null);
   const [pdf, setPdf] = useState<Blob | null>(null),
@@ -56,6 +60,7 @@ export default function PublishWorksheet({
       const { session } = await request("resultBegin", {
         id: analysis.requestId,
         reviewRevision: revision,
+        sourceRevision,
         files: await descriptors(files),
       });
       await upload(session, files, setMessage);
@@ -64,6 +69,7 @@ export default function PublishWorksheet({
         session,
         confirmed: true,
       });
+      onPublished?.();
       setMessage("검토 결과가 공개되었습니다.");
       setConfirmed(false);
     } catch (e) {
@@ -125,7 +131,9 @@ export default function PublishWorksheet({
         </>
       )}
       {blocked && (
-        <p>검토표를 먼저 저장하고 진행 중인 보완 요청을 처리하세요.</p>
+        <p>
+          검토자·법령 확인과 저장을 완료하고 진행 중인 보완 요청을 처리하세요.
+        </p>
       )}
       {error && <p role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}

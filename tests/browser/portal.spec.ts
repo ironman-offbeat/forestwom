@@ -1,20 +1,53 @@
 import { test, expect } from "@playwright/test";
-test("result formatting preserves evidence and renders safe readable lists on mobile", async ({ page }) => {
+test("result formatting preserves evidence and renders safe readable lists on mobile", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.route("**/api/requests", route => route.fulfill({ json: {
-    name: "서식 확인 도면", state: "published", notification: { state: "sent" },
-    result: { summary: "**추가 자료 필요**\n\n수치와 근거를 확인하세요.", reviewer: "담당자", reviewedAt: "2026-11-27",
-      findings: [{ title: "면적 검토", status: "보완", detail: "### 확인 사항\n- **대지면적**: 1,000㎡\n- 조경면적: 160㎡\n\n1. 산출표 확인\n2. 원본 대조\n\n<script>window.bad = true</script>", sources: [{file: "한글도면.pdf", page: 1, quote: "계획 조경면적: 160 m2"}] }],
-      holds: ["배치도 제출"], lawConfirmed: false, lawCheckedAt: "", lawNote: "적용 시점 확인 필요" }
-  }}));
+  await page.route("**/api/requests", (route) =>
+    route.fulfill({
+      json: {
+        name: "서식 확인 도면",
+        state: "published",
+        notification: { state: "sent" },
+        result: {
+          summary: "**추가 자료 필요**\n\n수치와 근거를 확인하세요.",
+          reviewer: "담당자",
+          reviewedAt: "2026-11-27",
+          findings: [
+            {
+              title: "면적 검토",
+              status: "보완",
+              detail:
+                "### 확인 사항\n- **대지면적**: 1,000㎡\n- 조경면적: 160㎡\n\n1. 산출표 확인\n2. 원본 대조\n\n<script>window.bad = true</script>",
+              sources: [
+                {
+                  file: "한글도면.pdf",
+                  page: 1,
+                  quote: "계획 조경면적: 160 m2",
+                },
+              ],
+            },
+          ],
+          holds: ["배치도 제출"],
+          lawConfirmed: false,
+          lawCheckedAt: "",
+          lawNote: "적용 시점 확인 필요",
+        },
+      },
+    }),
+  );
   await page.goto("/#/result/format-case");
-  await expect(page.locator(".report-summary strong")).toHaveText("추가 자료 필요");
+  await expect(page.locator(".report-summary strong")).toHaveText(
+    "추가 자료 필요",
+  );
   await expect(page.locator("article .report-text ul > li")).toHaveCount(2);
   await expect(page.locator("article .report-text ol > li")).toHaveCount(2);
   await expect(page.locator(".finding-number")).toHaveText("01");
   await expect(page.locator(".source-location")).toContainText("PDF 1페이지");
   await expect(page.locator(".analysis script")).toHaveCount(0);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
 });
 test("administrator previews and explicitly publishes matching result files", async ({
   page,
@@ -54,9 +87,6 @@ test("administrator previews and explicitly publishes matching result files", as
     return route.fulfill({ json: data[b.action] || {} });
   });
   await page.goto("/#/admin/case_1234567890");
-  await page
-    .getByLabel("결과 PDF", { exact: true })
-    .setInputFiles("public/samples/korean.pdf");
   const result = {
     schemaVersion: 1,
     requestId: c.id,
@@ -71,21 +101,31 @@ test("administrator previews and explicitly publishes matching result files", as
     lawNote: "확인",
   };
   await page
-    .getByLabel("결과 JSON", { exact: true })
+    .getByLabel("ChatGPT 결과 JSON 파일", { exact: true })
     .setInputFiles({
       name: "result.json",
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(result)),
     });
+  await page.getByRole("button", { name: "분석 결과 검증·가져오기" }).click();
   await expect(page.getByText("원본 대조 완료", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "검토 결과 공개" }),
+    page.getByRole("button", { name: "미리보기 PDF 생성" }),
   ).toBeDisabled();
-  await page.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "검토 결과 공개" }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "결과가 공개되었습니다.",
-  );
+  await page.getByLabel("최종 검토자").fill("실제 담당자");
+  await page
+    .getByLabel("법령 원문·적용 시점·확인 기록을 직접 대조했습니다.")
+    .check();
+  await page.getByRole("button", { name: "미리보기 PDF 생성" }).click();
+  await page
+    .getByLabel(
+      "도면 근거·적용 법령·PDF와 화면 내용을 대조했고 이 결과를 공개합니다.",
+    )
+    .check();
+  await page.getByRole("button", { name: "검토표 결과 공개" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "검토 결과가 공개" }),
+  ).toContainText("결과가 공개되었습니다.");
   expect(published).toBe(true);
 });
 test("intake fits a mobile viewport", async ({ page }) => {
@@ -216,22 +256,25 @@ test("Slack review link opens without login and JSON mismatch blocks publication
     };
     return route.fulfill({ json: data[b.action] || {} });
   });
-  await page.goto("/#/admin/case_1234567890");
+  await page.goto("/#/access/test-token/case_1234567890");
   await expect(page.getByLabel("관리자 키")).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "한글 도면", exact: true }),
   ).toBeVisible();
-  await page.getByLabel("결과 JSON", { exact: true }).setInputFiles({
-    name: "wrong.json",
-    mimeType: "application/json",
-    buffer: Buffer.from(
-      JSON.stringify({ schemaVersion: 1, requestId: "wrong" }),
-    ),
-  });
+  await page
+    .getByLabel("ChatGPT 결과 JSON 파일", { exact: true })
+    .setInputFiles({
+      name: "wrong.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({ schemaVersion: 1, requestId: "wrong" }),
+      ),
+    });
+  await page.getByRole("button", { name: "분석 결과 검증·가져오기" }).click();
   await expect(page.getByRole("alert")).toContainText("접수번호");
   await expect(
-    page.getByRole("button", { name: "검토 결과 공개" }),
-  ).toBeDisabled();
+    page.getByRole("button", { name: "검토표 결과 공개" }),
+  ).toHaveCount(0);
 });
 test("published result renders source pages and holds", async ({ page }) => {
   await page.route("**/api/requests", (route) =>
@@ -263,4 +306,25 @@ test("published result renders source pages and holds", async ({ page }) => {
   await expect(page.locator(".source-location strong")).toHaveText("도면.pdf");
   await expect(page.locator(".source-location span")).toHaveText("PDF 2페이지");
   await expect(page.getByText("수목 상세도 보완")).toBeVisible();
+});
+
+test("anonymous reviewer routes are blocked and cannot request case records", async ({
+  page,
+}) => {
+  const actions: string[] = [];
+  await page.route("**/api/requests", (route) => {
+    const b = route.request().postDataJSON();
+    actions.push(b.action);
+    return route.fulfill({ json: { admin: false } });
+  });
+  await page.goto("/#/admin/private-case");
+  await expect(
+    page.getByRole("heading", { name: "검토자 전용 화면" }),
+  ).toBeVisible();
+  expect(actions).toEqual(["session"]);
+  await page.goto("/#/case-review/private-case");
+  await expect(
+    page.getByRole("heading", { name: "검토자 전용 화면" }),
+  ).toBeVisible();
+  expect(actions.every((a) => a === "session")).toBe(true);
 });

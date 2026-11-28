@@ -33,6 +33,7 @@ async function setup(page: Page) {
     requestAction(action, { id: started.id, ...body }, env, m.fetcher, true);
   await page.route("**/api/requests", async (route) => {
     const { action, ...body } = route.request().postDataJSON();
+    if (action === "session") return route.fulfill({ json: { admin: true } });
     try {
       await route.fulfill({
         json: await requestAction(action, body, env, m.fetcher, true),
@@ -268,9 +269,14 @@ test("structured law decision → shared PDF and JSON → publication uses saved
   await expect(
     page.getByRole("heading", { name: /조경면적 법규 대조/ }),
   ).toBeVisible();
-  await page.setViewportSize({width:390,height:844});
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await page.screenshot({path:"test-results/published-worksheet-mobile.png",fullPage:true});
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await page.screenshot({
+    path: "test-results/published-worksheet-mobile.png",
+    fullPage: true,
+  });
 });
 
 test("request materials → submit on same result link → retain originals and reopen held review", async ({
@@ -322,4 +328,96 @@ test("request materials → submit on same result link → retain originals and 
   await expect(
     page.getByLabel("대지면적 후보", { exact: true }).locator("option"),
   ).toHaveCount(3);
+});
+
+test("unsaved worksheet survives reload and requires explicit recovery", async ({
+  page,
+}) => {
+  const { id } = await setup(page);
+  await page.goto(`/#/case-review/${id}`);
+  await expect(
+    page.getByText("접수 원본을 불러왔습니다. 사건 정보를 확인하세요."),
+  ).toBeVisible();
+  await page
+    .getByLabel("담당자 검토 메모", { exact: true })
+    .fill("복원할 초안");
+  await expect(page.getByText(/변경 내용을 이 기기에 임시 저장/)).toBeVisible();
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.reload();
+  await page.getByRole("button", { name: "임시 검토표 복원" }).click();
+  await expect(
+    page.getByLabel("담당자 검토 메모", { exact: true }),
+  ).toHaveValue("복원할 초안");
+  await page.getByRole("button", { name: "사건 검토표 저장", exact: true }).click();
+  await expect(page.getByText(/검토표 저장 완료/)).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        Object.keys(localStorage).filter((k) => k.includes(":worksheet:"))
+          .length,
+    ),
+  ).toBe(0);
+});
+
+test("analysis bundle preserves source bytes and imported JSON generates the published PDF", async ({
+  page,
+}) => {
+  const { id, call } = await setup(page);
+  await page.goto(`/#/admin/${id}`);
+  const event = page.waitForEvent("download");
+  await page.getByRole("button", { name: "분석 자료 한 번에 받기" }).click();
+  const bundle = await event;
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const files = unzipSync(readFileSync((await bundle.path())!));
+  expect(Buffer.from(files["normal.pdf"])).toEqual(
+    readFileSync("public/samples/normal.pdf"),
+  );
+  expect(strFromU8(files["분석요청문.txt"])).toContain("result.json 한 파일");
+  const record = await call("detail");
+  const today = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Seoul",
+  }).format(new Date());
+  const result = {
+    schemaVersion: 1,
+    requestId: id,
+    originals: record.originals,
+    reviewer: "AI",
+    reviewedAt: today,
+    summary: "가상 시험 — JSON에서 생성된 의견서",
+    findings: [
+      {
+        title: "자료 확인",
+        status: "보류",
+        detail: "실제 적합성 검증 아님",
+        sources: [{ file: "normal.pdf", page: 1, quote: "가상 자료" }],
+      },
+    ],
+    holds: ["실제 도면 미검증"],
+    lawConfirmed: true,
+    lawCheckedAt: today,
+    lawNote: "가상 시험에만 사용하는 법령 확인 가정",
+  };
+  await page.getByLabel("또는 JSON 붙여넣기").fill(JSON.stringify(result));
+  await page.getByRole("button", { name: "분석 결과 검증·가져오기" }).click();
+  await expect(
+    page.getByLabel("법령 원문·적용 시점·확인 기록을 직접 대조했습니다."),
+  ).not.toBeChecked();
+  await page.getByLabel("최종 검토자").fill("가상 검토 담당자");
+  await page
+    .getByLabel("법령 원문·적용 시점·확인 기록을 직접 대조했습니다.")
+    .check();
+  await page.getByRole("button", { name: "미리보기 PDF 생성" }).click();
+  await page
+    .getByLabel(
+      "도면 근거·적용 법령·PDF와 화면 내용을 대조했고 이 결과를 공개합니다.",
+    )
+    .check();
+  await page.getByRole("button", { name: "검토표 결과 공개" }).click();
+  await expect(
+    page.getByText("검토 결과가 공개되었습니다.", { exact: true }),
+  ).toBeVisible();
+  const published = await call("get");
+  expect(published.result.summary).toBe(result.summary);
+  expect(published.result.reviewer).toBe("가상 검토 담당자");
+  expect(published.pdf.size).toBeGreaterThan(1000);
 });

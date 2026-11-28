@@ -16,6 +16,7 @@
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
     "@vercel/connect": "^2.9.6",
+    "fflate": "^0.8.3",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.5.438",
     "react": "^19.3.1",
