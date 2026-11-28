@@ -1,3 +1,11 @@
+import PublishWorksheet from "./PublishWorksheet";
+import { worksheetResult } from "./worksheet-result";
+import {
+  invalidateItems,
+  validateItems,
+  type ReviewItem,
+} from "../shared/review-items.mjs";
+import ReviewItems, { ReviewItemsReport } from "./ReviewItems";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   emptyEntries,
@@ -26,6 +34,16 @@ import {
   type Snapshot,
   type StoredFile,
 } from "./storage";
+import CaseInfoForm from "./CaseInfoForm";
+import {
+  caseFields,
+  caseHolds,
+  emptyCaseInfo,
+  restoreWorksheet,
+  type Worksheet,
+  type SavedWorksheet,
+} from "./case-review";
+import { request, readAsset, type CaseRecord } from "./portal-api";
 import type { RenderTask } from "pdfjs-dist";
 
 const sources = [
@@ -59,13 +77,13 @@ const manual = [
 ];
 const fmt = (n: number) =>
   n.toLocaleString("ko-KR", { maximumFractionDigits: 6 });
-export default function App() {
+export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
   const [docs, setDocs] = useState<Document[]>([]);
   const [entries, setEntries] = useState<Entries>(emptyEntries),
     [gates, setGates] = useState<Gates>(emptyGates);
   const [selected, setSelected] = useState(""),
     [zoom, setZoom] = useState(1),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(!!linkedCase);
   const [error, setError] = useState(""),
     [renderError, setRenderError] = useState("");
   const [failedFiles, setFailedFiles] = useState<string[]>([]);
@@ -81,6 +99,170 @@ export default function App() {
   const [showSaved, setShowSaved] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | undefined>();
   const [openId, setOpenId] = useState("");
+  const [items, setItems] = useState<ReviewItem[]>([]);
+  const [caseInfo, setCaseInfo] = useState(emptyCaseInfo);
+  const [revision, setRevision] = useState(linkedCase?.review?.revision || 0);
+  const [loaded, setLoaded] = useState(!linkedCase);
+  const [savedContent, setSavedContent] = useState("");
+  const content = JSON.stringify({
+    caseInfo,
+    items,
+    entries,
+    gates,
+    reviewer,
+    remarks,
+    history,
+  });
+  const dirty = !!linkedCase && loaded && content !== savedContent;
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const navigate = (event: MouseEvent) => {
+      const anchor = (event.target as Element)?.closest?.("a");
+      if (
+        !anchor ||
+        anchor.target === "_blank" ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        event.button !== 0
+      )
+        return;
+      const next = new URL(anchor.href, location.href);
+      if (next.href === location.href || next.hash.startsWith("#/review/"))
+        return;
+      if (
+        !window.confirm("저장하지 않은 변경사항이 있습니다. 검토표를 떠날까요?")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    document.addEventListener("click", navigate, true);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      document.removeEventListener("click", navigate, true);
+    };
+  }, [dirty]);
+  useEffect(() => {
+    if (!linkedCase) return;
+    let cancelled = false;
+    const restored: Document[] = [];
+    (async () => {
+      try {
+        for (const asset of linkedCase.originals) {
+          const blob = await readAsset(linkedCase.id, asset);
+          if (cancelled) return;
+          const doc = await readPDF(
+            new File([blob], asset.name, { type: "application/pdf" }),
+            asset.id,
+          );
+          if (cancelled) {
+            void doc.pdf.loadingTask.destroy();
+            return;
+          }
+          restored.push(doc);
+        }
+        const documents = restored.map((doc, i) => ({
+          id: doc.id,
+          name: doc.name,
+          hash: linkedCase.originals[i].hash,
+          pageCount: doc.pages.length,
+        }));
+        const saved = linkedCase.review?.draft;
+        const draft = saved ? restoreWorksheet(saved, documents) : null;
+        if (cancelled) return;
+        const next = {
+          caseInfo: draft?.info || emptyCaseInfo(),
+          items: draft?.items || [],
+          entries: draft?.entries || emptyEntries(),
+          gates: draft?.gates || emptyGates(),
+          reviewer: draft?.reviewer || "",
+          remarks: draft?.remarks || "",
+          history: draft?.history || [],
+        };
+        setDocs(restored);
+        setCaseInfo(next.caseInfo);
+        setItems(next.items);
+        setEntries(next.entries);
+        setGates(next.gates);
+        setReviewer(next.reviewer);
+        setRemarks(next.remarks);
+        setHistory(next.history);
+        setSavedContent(JSON.stringify(next));
+        setCaseName(linkedCase.name);
+        setSelected(restored[0]?.pages[0]?.id || "");
+        setLoaded(true);
+        setStorageMessage(
+          saved && saved.ruleVersion !== RULE_VERSION
+            ? "규칙 버전이 변경되었습니다. 수치와 적용 기준을 다시 확인하세요."
+            : linkedCase.review
+              ? "저장된 검토표와 원본을 불러왔습니다."
+              : "접수 원본을 불러왔습니다. 사건 정보를 확인하세요.",
+        );
+      } catch (e) {
+        restored.forEach((d) => void d.pdf.loadingTask.destroy());
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "원본 불러오기 실패");
+          setFailedFiles(["접수 원본 불러오기 실패"]);
+        }
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      restored.forEach((d) => void d.pdf.loadingTask.destroy());
+    };
+  }, [linkedCase]);
+  async function saveCaseReview() {
+    if (!linkedCase || !loaded || busy) return;
+    setBusy(true);
+    setError("");
+    setStorageMessage("원본과 검토표를 검증하고 저장하는 중입니다…");
+    try {
+      const draft: Worksheet = {
+        schemaVersion: 1,
+        ruleVersion: RULE_VERSION,
+        info: caseInfo,
+        documents: docs.map((d) => ({
+          id: d.id,
+          name: d.name,
+          pageCount: d.pages.length,
+          hash: linkedCase.originals.find((o) => o.id === d.id)!.hash,
+        })),
+        entries,
+        gates,
+        reviewer,
+        remarks,
+        history: history.slice(-100),
+        items: validateItems(
+          items,
+          docs.map((d) => ({ id: d.id, pageCount: d.pages.length })),
+          gates.basisDate,
+        ),
+      };
+      const saved = await request<SavedWorksheet>("saveReview", {
+        id: linkedCase.id,
+        revision,
+        draft,
+      });
+      setRevision(saved.revision);
+      setSavedContent(content);
+      setStorageMessage(
+        `검토표 저장 완료 · ${new Date(saved.savedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} · ${saved.revision}차 저장`,
+      );
+    } catch (e) {
+      setStorageMessage("");
+      setError(e instanceof Error ? e.message : "검토표 저장 실패");
+    } finally {
+      setBusy(false);
+    }
+  }
   const canvas = useRef<HTMLCanvasElement>(null),
     docsRef = useRef(docs);
   docsRef.current = docs;
@@ -93,7 +275,13 @@ export default function App() {
   const pages = useMemo(() => docs.flatMap((d) => d.pages), [docs]);
   const candidates = useMemo(() => extract(pages), [pages]);
   const current = pages.find((p) => p.id === selected);
-  const computed = evaluate(entries, pages, gates);
+  const evaluated = evaluate(entries, pages, gates);
+  const infoHolds = linkedCase ? caseHolds(caseInfo) : [];
+  if (renderError)
+    infoHolds.push("원본 렌더링 오류: 원본을 다시 확인해야 합니다.");
+  const computed = infoHolds.length
+    ? { ...evaluated, checks: [], holds: [...infoHolds, ...evaluated.holds] }
+    : evaluated;
   const result = failedFiles.length
     ? {
         ...computed,
@@ -107,6 +295,36 @@ export default function App() {
         ],
       }
     : computed;
+  let publicResult = null;
+  let publicError = "";
+  if (linkedCase && loaded && !dirty && revision > 0) {
+    try {
+      publicResult = worksheetResult(
+        linkedCase,
+        {
+          schemaVersion: 1,
+          ruleVersion: RULE_VERSION,
+          info: caseInfo,
+          documents: docs.map((d) => ({
+            id: d.id,
+            name: d.name,
+            hash: linkedCase.originals.find((o) => o.id === d.id)!.hash,
+            pageCount: d.pages.length,
+          })),
+          entries,
+          gates,
+          reviewer,
+          remarks,
+          history,
+          items,
+        },
+        pages,
+        revision,
+      );
+    } catch (e) {
+      publicError = (e as Error).message;
+    }
+  }
   const confirmed = fields.filter(([k]) => entries[k].confirmed).length;
   useEffect(() => {
     let cancelled = false,
@@ -140,6 +358,7 @@ export default function App() {
     };
   }, [docs, selected, zoom]);
   function change(k: Key, patch: Partial<Entry>) {
+    setItems(invalidateItems);
     setApproved("");
     setEntries((prev) => ({
       ...prev,
@@ -147,6 +366,7 @@ export default function App() {
     }));
   }
   function gate(patch: Partial<Gates>) {
+    setItems(invalidateItems);
     setGates((prev) => ({ ...prev, ...patch }));
     setApproved("");
   }
@@ -162,7 +382,7 @@ export default function App() {
     setApproved("");
     const p = pages.find((p) => p.id === e.pageId)!;
     setHistory((h) => [
-      ...h,
+      ...(linkedCase ? h.slice(-99) : h),
       `${new Date().toLocaleTimeString("ko-KR")} ${fields.find((f) => f[0] === k)![1]} ${e.value}㎡ 확정 · ${p.file} p.${p.number} · ${e.note}`,
     ]);
   }
@@ -397,20 +617,35 @@ export default function App() {
             <div>
               <p className="eyebrow">LANDSCAPE REVIEW</p>
               <h1>
-                PDF를 넣고,
-                <br />
-                검토 결과를 확인하세요.
+                {linkedCase ? (
+                  `${linkedCase.name} · 사건 검토표`
+                ) : (
+                  <>
+                    PDF를 넣고,
+                    <br />
+                    검토 결과를 확인하세요.
+                  </>
+                )}
               </h1>
-              <ol className="howto">
-                <li>신청서와 도면 PDF를 선택하세요.</li>
-                <li>추출된 수치를 원본 페이지와 대조하고 수정·확정하세요.</li>
-                <li>
-                  적용 기준을 확인한 뒤, 검토 의견서의 보완 항목을 확인하세요.
-                </li>
-                <li>
-                  도면과 의견서 PDF를 저장소에 넣고, 필요할 때 다시 여세요.
-                </li>
-              </ol>
+              {!linkedCase && (
+                <ol className="howto">
+                  <li>신청서와 도면 PDF를 선택하세요.</li>
+                  <li>추출된 수치를 원본 페이지와 대조하고 수정·확정하세요.</li>
+                  <li>
+                    적용 기준을 확인한 뒤, 검토 의견서의 보완 항목을 확인하세요.
+                  </li>
+                  <li>
+                    도면과 의견서 PDF를 저장소에 넣고, 필요할 때 다시 여세요.
+                  </li>
+                </ol>
+              )}
+              {linkedCase && (
+                <p>
+                  접수 원본을 대조하고 사건 정보·수치·적용 기준을 기록하세요.
+                  저장한 검토표는 담당자용이며 결과 페이지에 자동 공개되지
+                  않습니다.
+                </p>
+              )}
             </div>
             <div className="summary">
               <strong>{pages.length.toString().padStart(2, "0")}</strong>
@@ -465,130 +700,174 @@ export default function App() {
               04 검토 의견서
             </a>
           </nav>
-          <section id="input" className="panel no-print">
-            <div className="section-title">
-              <h2>자료 등록</h2>
-              <button
-                className="quiet"
-                disabled={busy || (!docs.length && !failedFiles.length)}
-                onClick={reset}
-              >
-                검토 초기화
-              </button>
-            </div>
-            <div className="repository">
-              <label>
-                도면 이름
-                <input
-                  aria-label="도면 이름"
-                  maxLength={100}
-                  value={caseName}
-                  placeholder="입력하지 않으면 첫 PDF 파일 이름 사용"
-                  onChange={(e) => setCaseName(e.target.value)}
-                />
-              </label>
-              <div className="storage-actions">
+          {linkedCase && (
+            <>
+              <section className="panel no-print">
+                <h2>검토표 저장</h2>
+                <p>접수번호: {linkedCase.id}</p>
                 <button
-                  disabled={busy || !docs.length}
-                  onClick={() => void save()}
+                  disabled={busy || !loaded}
+                  onClick={() => void saveCaseReview()}
                 >
-                  저장소에 넣어두기
+                  사건 검토표 저장
                 </button>
-                <button disabled={busy} onClick={() => void listSaved()}>
-                  저장한 검토 다시 열기
-                </button>
-                <a
-                  className="button"
-                  href={folderUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  저장소 보기 ↗
-                </a>
-              </div>
-              <p className="muted">
-                원본 PDF · 의견서 PDF · 검토 기록을 함께 저장합니다. 저장소
-                링크를 가진 사람은 자료를 열람·수정할 수 있습니다.
-              </p>
-              {storageMessage && <p aria-live="polite">{storageMessage}</p>}
-              {showSaved && (
-                <div>
-                  <label>
-                    저장한 검토
-                    <select
-                      aria-label="저장한 검토"
-                      value={openId}
-                      onChange={(e) => setOpenId(e.target.value)}
-                    >
-                      <option value="">
-                        {savedItems.length
-                          ? "저장본 선택"
-                          : "완료된 저장본이 없습니다"}
-                      </option>
-                      {savedItems.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <p>
-                    현재 작업을 선택한 저장본으로 바꿉니다. 변경한 내용은 먼저
-                    저장하세요.
-                  </p>
+                <p>
+                  {dirty
+                    ? "저장하지 않은 변경사항이 있습니다."
+                    : "저장 후 다시 열어 검토를 이어갈 수 있습니다."}
+                </p>
+                {storageMessage && <p role="status">{storageMessage}</p>}
+              </section>
+              <CaseInfoForm
+                value={caseInfo}
+                onChange={(key, fact) => {
+                  setItems(invalidateItems);
+                  setCaseInfo((prev) => ({ ...prev, [key]: fact }));
+                  setGates((prev) => ({
+                    ...prev,
+                    scope: false,
+                    law: false,
+                    conflicts: false,
+                  }));
+                  setApproved("");
+                }}
+              />
+            </>
+          )}
+          <section id="input" className="panel no-print">
+            {!linkedCase && (
+              <>
+                <div className="section-title">
+                  <h2>자료 등록</h2>
                   <button
-                    disabled={busy || !openId}
-                    onClick={() => void reopen()}
+                    className="quiet"
+                    disabled={busy || (!docs.length && !failedFiles.length)}
+                    onClick={reset}
                   >
-                    선택한 검토 열기
+                    검토 초기화
                   </button>
-                  {nextCursor && (
-                    <button
-                      disabled={busy}
-                      onClick={() => void listSaved(true)}
-                    >
-                      이전 저장본 더 보기
-                    </button>
-                  )}
-                  <button onClick={() => setShowSaved(false)}>닫기</button>
                 </div>
-              )}
-            </div>
-            <div className="upload">
-              <div>
-                <strong>신청서와 PDF 도면을 선택하세요</strong>
-                <p>최대 10개 · 파일당 30MB / 100페이지 · 스캔본은 판독 보류</p>
-              </div>
-              <label className={`button ${busy ? "disabled" : ""}`}>
-                PDF 선택
-                <input
-                  aria-label="PDF 파일 선택"
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  multiple
-                  disabled={busy}
-                  onChange={(e) => {
-                    void addFiles(Array.from(e.target.files ?? []));
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-            </div>
-            <div className="samples">
-              <span>가상 PDF로 시작</span>
-              {[
-                ["normal", "정상 수치"],
-                ["korean", "한글 도면"],
-                ["deficient", "기준 미달"],
-                ["conflict", "도면 불일치"],
-                ["scan", "스캔본"],
-                ["mixed", "혼합 문서"],
-              ].map(([n, t]) => (
-                <button key={n} disabled={busy} onClick={() => void sample(n)}>
-                  {t}
-                </button>
-              ))}
-            </div>
+                <div className="repository">
+                  <label>
+                    도면 이름
+                    <input
+                      aria-label="도면 이름"
+                      maxLength={100}
+                      value={caseName}
+                      placeholder="입력하지 않으면 첫 PDF 파일 이름 사용"
+                      onChange={(e) => setCaseName(e.target.value)}
+                    />
+                  </label>
+                  <div className="storage-actions">
+                    <button
+                      disabled={busy || !docs.length}
+                      onClick={() => void save()}
+                    >
+                      저장소에 넣어두기
+                    </button>
+                    <button disabled={busy} onClick={() => void listSaved()}>
+                      저장한 검토 다시 열기
+                    </button>
+                    <a
+                      className="button"
+                      href={folderUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      저장소 보기 ↗
+                    </a>
+                  </div>
+                  <p className="muted">
+                    원본 PDF · 의견서 PDF · 검토 기록을 함께 저장합니다. 저장소
+                    링크를 가진 사람은 자료를 열람·수정할 수 있습니다.
+                  </p>
+                  {storageMessage && <p aria-live="polite">{storageMessage}</p>}
+                  {showSaved && (
+                    <div>
+                      <label>
+                        저장한 검토
+                        <select
+                          aria-label="저장한 검토"
+                          value={openId}
+                          onChange={(e) => setOpenId(e.target.value)}
+                        >
+                          <option value="">
+                            {savedItems.length
+                              ? "저장본 선택"
+                              : "완료된 저장본이 없습니다"}
+                          </option>
+                          {savedItems.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <p>
+                        현재 작업을 선택한 저장본으로 바꿉니다. 변경한 내용은
+                        먼저 저장하세요.
+                      </p>
+                      <button
+                        disabled={busy || !openId}
+                        onClick={() => void reopen()}
+                      >
+                        선택한 검토 열기
+                      </button>
+                      {nextCursor && (
+                        <button
+                          disabled={busy}
+                          onClick={() => void listSaved(true)}
+                        >
+                          이전 저장본 더 보기
+                        </button>
+                      )}
+                      <button onClick={() => setShowSaved(false)}>닫기</button>
+                    </div>
+                  )}
+                </div>
+                <div className="upload">
+                  <div>
+                    <strong>신청서와 PDF 도면을 선택하세요</strong>
+                    <p>
+                      최대 10개 · 파일당 30MB / 100페이지 · 스캔본은 판독 보류
+                    </p>
+                  </div>
+                  <label className={`button ${busy ? "disabled" : ""}`}>
+                    PDF 선택
+                    <input
+                      aria-label="PDF 파일 선택"
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      multiple
+                      disabled={busy}
+                      onChange={(e) => {
+                        void addFiles(Array.from(e.target.files ?? []));
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                <div className="samples">
+                  <span>가상 PDF로 시작</span>
+                  {[
+                    ["normal", "정상 수치"],
+                    ["korean", "한글 도면"],
+                    ["deficient", "기준 미달"],
+                    ["conflict", "도면 불일치"],
+                    ["scan", "스캔본"],
+                    ["mixed", "혼합 문서"],
+                  ].map(([n, t]) => (
+                    <button
+                      key={n}
+                      disabled={busy}
+                      onClick={() => void sample(n)}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
             <p role="status">
               {busy
                 ? "PDF를 브라우저에서 읽는 중입니다…"
@@ -731,6 +1010,7 @@ export default function App() {
                           검수값 (㎡)
                           <input
                             aria-label={`${label} 검수값`}
+                            maxLength={100}
                             inputMode="decimal"
                             value={e.value}
                             onChange={(event) =>
@@ -761,6 +1041,7 @@ export default function App() {
                         원본 대조·수정·채택 사유
                         <input
                           aria-label={`${label} 검수 사유`}
+                          maxLength={linkedCase ? 2000 : undefined}
                           placeholder="표 위치, 원문 표기, 수정 사유 등"
                           value={e.note}
                           onChange={(event) =>
@@ -858,6 +1139,7 @@ export default function App() {
               법령 확인 기록
               <textarea
                 aria-label="법령 확인 기록"
+                maxLength={10000}
                 placeholder="확인한 시행일·조문·부칙·면제/특례·용도지역·건축물 용도 및 적용 사유"
                 value={gates.lawNote}
                 onChange={(e) => gate({ lawNote: e.target.value })}
@@ -892,6 +1174,22 @@ export default function App() {
               구분했습니다.
             </label>
           </section>
+          {linkedCase && (
+            <ReviewItems
+              items={items}
+              documents={docs.map((d) => ({
+                id: d.id,
+                name: d.name,
+                hash: linkedCase.originals.find((o) => o.id === d.id)!.hash,
+                pageCount: d.pages.length,
+              }))}
+              canDecide={!result.holds.length}
+              onChange={(next) => {
+                setItems(next);
+                setApproved("");
+              }}
+            />
+          )}
           <section id="report" className="panel report">
             <div className="section-title">
               <div>
@@ -924,6 +1222,37 @@ export default function App() {
               기존 자료·정오표 미확보, 수목·배치·공개공지 등 수동 검토 항목이
               남아 있습니다.
             </p>
+            {linkedCase && (
+              <>
+                <h3>사건 정보</h3>
+                <dl>
+                  {caseFields.map(([key, label]) => (
+                    <div key={key}>
+                      <dt>{label}</dt>
+                      <dd>
+                        {caseInfo[key].value || "미확인"} ·{" "}
+                        {caseInfo[key].status === "confirmed"
+                          ? "담당자 확인"
+                          : "미확정"}
+                        <br />
+                        {caseInfo[key].source}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </>
+            )}
+            {linkedCase && (
+              <ReviewItemsReport
+                items={items}
+                documents={docs.map((d) => ({
+                  id: d.id,
+                  name: d.name,
+                  hash: linkedCase.originals.find((o) => o.id === d.id)!.hash,
+                  pageCount: d.pages.length,
+                }))}
+              />
+            )}
             <h3>1. 제출자료 판독 현황</h3>
             {pages.length ? (
               <ul>
@@ -1052,6 +1381,7 @@ export default function App() {
               담당자 검토 메모
               <textarea
                 aria-label="담당자 검토 메모"
+                maxLength={10000}
                 value={remarks}
                 onChange={(e) => {
                   setRemarks(e.target.value);
@@ -1066,6 +1396,7 @@ export default function App() {
                 검토자
                 <input
                   aria-label="검토자"
+                  maxLength={200}
                   value={reviewer}
                   onChange={(e) => {
                     setReviewer(e.target.value);
@@ -1107,6 +1438,17 @@ export default function App() {
               <p>확정 기록 없음</p>
             )}
           </section>
+          {linkedCase && publicResult && (
+            <PublishWorksheet
+              key={`${revision}-${content}`}
+              analysis={publicResult}
+              revision={revision}
+              blocked={
+                !!linkedCase.materialRequests?.some((r) => r.state === "open")
+              }
+            />
+          )}
+          {linkedCase && publicError && <p>{publicError}</p>}
           <footer>
             Forestwom · 선택한 도면과 검토 기록은 저장 버튼을 누를 때 Google
             Drive로 전송됩니다.

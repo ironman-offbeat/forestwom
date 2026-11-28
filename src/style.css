@@ -619,3 +619,29 @@ select {
 .storage-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
 
 .app-fields {border:0;padding:0;margin:0;min-width:0;}
+
+.case-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.case-fact {
+  border: 1px solid #dce3df;
+  border-radius: 8px;
+  padding: 1rem;
+  min-width: 0;
+}
+.case-fact label {
+  display: block;
+  margin-bottom: 0.6rem;
+}
+.case-fact input,
+.case-fact select {
+  width: 100%;
+  min-width: 0;
+}
+@media (max-width: 700px) {
+  .case-info-grid {
+    grid-template-columns: 1fr;
+  }
+}

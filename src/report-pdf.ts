@@ -39,7 +39,8 @@ export async function reportPDF(element: HTMLElement): Promise<Blob> {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const font = await pdf.embedFont(await response.arrayBuffer(), {
-    subset: true,
+    // Full embedding avoids missing Hangul glyphs in subset fonts across PDF viewers.
+    subset: false,
   });
   const supported = new Set(font.getCharacterSet());
   const lines: { text: string; size: number }[] = [];
@@ -47,12 +48,17 @@ export async function reportPDF(element: HTMLElement): Promise<Blob> {
     .replaceAll("㎡", "m2")
     .replaceAll("\t", "   ")
     .split("\n")) {
-    const size =
-      paragraph === "건축협의 조경 검토 의견서"
-        ? 18
-        : /^\d\. /.test(paragraph)
-          ? 12
-          : 10;
+    const size = ["건축협의 조경 검토 의견서", "검토 결과"].includes(paragraph)
+      ? 18
+      : /^\d\. /.test(paragraph) ||
+          [
+            "종합 의견",
+            "항목별 검토",
+            "추가 확인·보류",
+            "법령 확인 기록",
+          ].includes(paragraph)
+        ? 12
+        : 10;
     let line = "";
     for (const original of paragraph) {
       const char = supported.has(original.codePointAt(0)!) ? original : " ";
@@ -80,16 +86,14 @@ export async function reportPDF(element: HTMLElement): Promise<Blob> {
     });
     y -= line.size + 7;
   }
-  pdf
-    .getPages()
-    .forEach((p, i, pages) =>
-      p.drawText(`Forestwom | ${i + 1} / ${pages.length}`, {
-        x: 48,
-        y: 28,
-        size: 8,
-        font,
-      }),
-    );
+  pdf.getPages().forEach((p, i, pages) =>
+    p.drawText(`Forestwom | ${i + 1} / ${pages.length}`, {
+      x: 48,
+      y: 28,
+      size: 8,
+      font,
+    }),
+  );
   pdf.setTitle("건축협의 조경 검토 의견서");
   return new Blob([new Uint8Array(await pdf.save())], {
     type: "application/pdf",

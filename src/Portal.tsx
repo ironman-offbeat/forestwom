@@ -1,3 +1,8 @@
+import {
+  MaterialHistory,
+  RequestMaterials,
+  SubmitMaterials,
+} from "./Materials";
 import { useEffect, useState, lazy, Suspense } from "react";
 import {
   request,
@@ -14,54 +19,9 @@ import {
 } from "./portal-api";
 import { folderUrl } from "./storage";
 import "./portal.css";
-import { ReportText } from "./ReportText";
+import Report from "./Report";
+const CaseReview = lazy(() => import("./CaseReview"));
 const Review = lazy(() => import("./App"));
-function Report({ r }: { r: Analysis }) {
-  return (
-    <section className="analysis">
-      <h2>검토 결과</h2>
-      <div className="report-summary"><h3>종합 의견</h3><ReportText text={r.summary} /></div>
-      <p className="muted">
-        {r.reviewer} · {r.reviewedAt}
-      </p>
-      <ul className="report-counts" aria-label="검토 항목 현황">
-        {["확인", "보완", "보류"].map(status => <li key={status}>{status} <strong>{r.findings.filter(f => f.status === status).length}건</strong></li>)}
-      </ul>
-      <h3 className="report-section-title">항목별 검토</h3>
-      <ol className="report-findings">
-      {r.findings.map((f, i) => (
-        <li key={i}><article>
-          <div className="finding-heading"><h4><span className="finding-number">{String(i + 1).padStart(2, "0")}</span>{f.title}</h4>
-          <span className={`pill status-${f.status === "보완" ? "action" : f.status === "보류" ? "hold" : "checked"}`}>{f.status}</span></div>
-          <ReportText text={f.detail} />
-          {!!f.sources.length && <div className="report-sources"><h5>도면 근거</h5>
-          {f.sources.map((s, j) => (
-            <blockquote key={j}>
-              <p className="source-location"><strong>{s.file}</strong><span>PDF {s.page}페이지</span></p>
-              <ReportText text={s.quote} />
-            </blockquote>
-          ))}</div>}
-        </article></li>
-      ))}
-      </ol>
-      {!!r.holds.length && (
-        <div className="report-holds">
-          <h3>추가 확인·보류</h3>
-          <ul>
-            {r.holds.map((h, i) => (
-              <li key={i}><ReportText text={h} /></li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div className="report-law">
-      <h3>법령 확인 기록</h3>
-      <p className="muted"><strong>{r.lawConfirmed ? "확인 완료" : "확인 필요"}</strong> · 확인일: {r.lawCheckedAt || "미확인"}</p>
-      <ReportText text={r.lawNote || "확인 기록 없음"} />
-      </div>
-    </section>
-  );
-}
 export default function Portal() {
   const [route, setRoute] = useState(location.hash);
   useEffect(() => {
@@ -70,6 +30,12 @@ export default function Portal() {
     return () => removeEventListener("hashchange", change);
   }, []);
   const parts = route.replace(/^#\/?/, "").split("/");
+  if (parts[0] === "case-review" && parts[1])
+    return (
+      <Suspense fallback={<p>검토표를 여는 중입니다.</p>}>
+        <CaseReview key={parts[1]} id={parts[1]} />
+      </Suspense>
+    );
   if (parts[0] === "review")
     return (
       <Suspense fallback={<p>검토 도구를 여는 중입니다.</p>}>
@@ -332,7 +298,7 @@ function Result({ id }: { id?: string }) {
           {data && !data.result && (
             <p>
               {data.state === "needs_material"
-                ? "추가 자료가 필요합니다. 담당자에게 확인한 뒤 새 요청에 기존 접수번호를 적어주세요."
+                ? "추가 자료가 필요합니다. 아래 보완 요청 내용을 확인해 주세요."
                 : "담당자가 원본을 확인하고 분석한 뒤 결과를 등록합니다."}
             </p>
           )}
@@ -353,6 +319,28 @@ function Result({ id }: { id?: string }) {
         </section>
       )}
       {error && <p role="alert">{error}</p>}
+      {data?.materialRequests?.length > 0 && (
+        <MaterialHistory
+          requests={data.materialRequests}
+          submissions={data.submissions}
+        />
+      )}
+      {id &&
+        data?.state === "needs_material" &&
+        data.materialRequests?.at(-1)?.state === "open" && (
+          <SubmitMaterials
+            key={data.materialRequests.at(-1).id}
+            id={id}
+            material={data.materialRequests.at(-1)}
+            onDone={refresh}
+          />
+        )}
+      {data?.resultIsPrevious && (
+        <p className="notice">
+          아래 의견서는 이전 제출 자료에 대한 결과입니다. 현재 자료는 재검토
+          중입니다.
+        </p>
+      )}
       {data?.result && <Report r={data.result} />}
     </>
   );
@@ -487,6 +475,13 @@ function Admin({ id }: { id?: string }) {
               <section className="card">
                 <span className="pill">{states[c.state]}</span>
                 <p>접수번호: {c.id}</p>
+                {c.state !== "uploading" && (
+                  <p>
+                    <a className="button" href={`#/case-review/${c.id}`}>
+                      사건 검토표 열기
+                    </a>
+                  </p>
+                )}
                 <p>{c.note || "요청 메모 없음"}</p>
                 <a href={`#/result/${c.id}`}>결과 페이지 열기 ↗</a>
                 <div className="toolbar">
@@ -550,6 +545,7 @@ function Admin({ id }: { id?: string }) {
                   Slack 알림 재전송
                 </button>
               </section>
+              <RequestMaterials record={c} onSaved={setCase} />
               <section className="card">
                 <h2>1. ChatGPT에서 분석하기</h2>
                 <p>

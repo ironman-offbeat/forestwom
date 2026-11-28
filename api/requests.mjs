@@ -1,3 +1,4 @@
+import { appOrigins } from "../server/origins.mjs";
 import { requestAction } from "../server/requests.mjs";
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -6,10 +7,7 @@ export default async function handler(req, res) {
   const origin = req.headers.origin;
   if (
     origin &&
-    ![
-      "https://forestwom.2hayoung.com",
-      "https://forestwom-261.vercel.app",
-    ].includes(origin)
+    !appOrigins().includes(origin)
   )
     return res.status(403).json({ error: "허용되지 않은 앱 주소입니다." });
   try {
