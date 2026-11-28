@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+test.beforeEach(async ({page})=>{await page.route("**/api/requests",route=>route.fulfill({json:{admin:true}}));});
 import { readFile } from "node:fs/promises";
 import { PDFDocument } from "pdf-lib";
 test("creates a real Korean PDF download and removes obsolete notices", async ({

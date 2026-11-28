@@ -1,3 +1,5 @@
+import ReviewerAccess from "./ReviewerAccess";
+import AnalysisImport from "./AnalysisImport";
 import {
   MaterialHistory,
   RequestMaterials,
@@ -30,10 +32,14 @@ export default function Portal() {
     return () => removeEventListener("hashchange", change);
   }, []);
   const parts = route.replace(/^#\/?/, "").split("/");
+  if (parts[0] === "access")
+    return <ReviewerAccess token={parts[1]} id={parts[2]} />;
   if (parts[0] === "case-review" && parts[1])
     return (
       <Suspense fallback={<p>검토표를 여는 중입니다.</p>}>
-        <CaseReview key={parts[1]} id={parts[1]} />
+        <ReviewerAccess>
+          <CaseReview key={parts[1]} id={parts[1]} />
+        </ReviewerAccess>
       </Suspense>
     );
   if (parts[0] === "review")
@@ -42,7 +48,9 @@ export default function Portal() {
         <a className="portal-return" href="#/">
           접수 화면으로
         </a>
-        <Review />
+        <ReviewerAccess>
+          <Review />
+        </ReviewerAccess>
       </Suspense>
     );
   return (
@@ -62,7 +70,9 @@ export default function Portal() {
       </header>
       <main key={route}>
         {parts[0] === "admin" ? (
-          <Admin id={parts[1]} />
+          <ReviewerAccess>
+            <Admin id={parts[1]} />
+          </ReviewerAccess>
         ) : parts[0] === "result" ? (
           <Result id={parts[1]} />
         ) : (
@@ -353,20 +363,6 @@ function Admin({ id }: { id?: string }) {
     [cursor, setCursor] = useState<string>(),
     [c, setCase] = useState<CaseRecord | null>(null),
     [slack, setSlack] = useState(false);
-  const [pdf, setPdf] = useState<File | null>(null),
-    [json, setJson] = useState<File | null>(null),
-    [preview, setPreview] = useState<Analysis | null>(null),
-    [pdfUrl, setPdfUrl] = useState(""),
-    [confirmed, setConfirmed] = useState(false);
-  useEffect(() => {
-    if (!pdf) {
-      setPdfUrl("");
-      return;
-    }
-    const u = URL.createObjectURL(pdf);
-    setPdfUrl(u);
-    return () => URL.revokeObjectURL(u);
-  }, [pdf]);
   async function work(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -390,36 +386,8 @@ function Admin({ id }: { id?: string }) {
   useEffect(() => {
     void work(load);
   }, [id]);
-  async function openJson(f: File) {
-    setJson(null);
-    setPreview(null);
-    setConfirmed(false);
-    if (f.size > 1000000) throw Error("JSON은 1MB 이하로 등록하세요.");
-    const r = JSON.parse(await f.text());
-    const { validateResult } = await import("./result-validation");
-    validateResult(r, c!);
-    setJson(f);
-    setPreview(r);
-  }
-  async function publish() {
-    if (!c || !pdf || !json || !preview || !confirmed) return;
-    await work(async () => {
-      const files = [
-        new File([pdf], "report.pdf", { type: "application/pdf" }),
-        new File([json], "result.json", { type: "application/json" }),
-      ];
-      const { session } = await request("resultBegin", {
-        id: c.id,
-        files: await descriptors(files),
-      });
-      await upload(session, files, setMessage);
-      setCase(await request("publish", { id: c.id, session, confirmed: true }));
-      setMessage("결과가 공개되었습니다.");
-      setConfirmed(false);
-    });
-  }
   async function fetchFile(f: Asset) {
-    await work(async () => download(await readAsset(c!.id, f), f.name));
+    if (c) await work(async () => download(await readAsset(c.id, f), f.name));
   }
   return (
     <>
@@ -546,103 +514,7 @@ function Admin({ id }: { id?: string }) {
                 </button>
               </section>
               <RequestMaterials record={c} onSaved={setCase} />
-              <section className="card">
-                <h2>1. ChatGPT에서 분석하기</h2>
-                <p>
-                  원본 PDF와 분석 요청문을 받아 ChatGPT에 첨부하세요. 분석 후
-                  의견서 PDF와 JSON을 아래에 등록합니다.
-                </p>
-                {c.originals.map((f) => (
-                  <button
-                    key={f.name}
-                    disabled={busy || !f.id}
-                    onClick={() => fetchFile(f)}
-                  >
-                    {f.name} 다운로드
-                  </button>
-                ))}
-                <div className="toolbar">
-                  <button
-                    onClick={() =>
-                      download(
-                        new Blob([prompt(c)], {
-                          type: "text/plain;charset=utf-8",
-                        }),
-                        "분석요청문.txt",
-                      )
-                    }
-                  >
-                    분석 요청문 다운로드
-                  </button>
-                  <button
-                    onClick={() =>
-                      download(
-                        new Blob([JSON.stringify(template(c), null, 2)], {
-                          type: "application/json",
-                        }),
-                        "result-template.json",
-                      )
-                    }
-                  >
-                    JSON 템플릿 다운로드
-                  </button>
-                </div>
-              </section>
-              <section className="card">
-                <h2>2. 결과를 확인하고 공개하기</h2>
-                <label>
-                  결과 PDF
-                  <input
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    disabled={busy}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      setConfirmed(false);
-                      setPdf(null);
-                      if (
-                        f &&
-                        f.size <= 30 * 1024 * 1024 &&
-                        f.size > 0 &&
-                        /\.pdf$/i.test(f.name)
-                      )
-                        setPdf(f);
-                      else setError("결과 PDF는 30MB 이하로 등록하세요.");
-                    }}
-                  />
-                </label>
-                <label>
-                  결과 JSON
-                  <input
-                    type="file"
-                    accept="application/json,.json"
-                    disabled={busy}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void work(() => openJson(f));
-                    }}
-                  />
-                </label>
-                {pdfUrl && <iframe title="결과 PDF 미리보기" src={pdfUrl} />}
-                {preview && <Report r={preview} />}
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={confirmed}
-                    disabled={busy || !pdf || !preview}
-                    onChange={(e) => setConfirmed(e.target.checked)}
-                  />
-                  PDF·JSON 내용과 근거, 법령 최신성을 대조했습니다. 이 결과를
-                  공개합니다.
-                </label>
-                <button
-                  className="primary"
-                  disabled={busy || !confirmed || !pdf || !json}
-                  onClick={publish}
-                >
-                  검토 결과 공개
-                </button>
-              </section>
+              <AnalysisImport record={c} />
               {!!c.versions.length && (
                 <section className="card">
                   <h2>보관된 결과 버전</h2>

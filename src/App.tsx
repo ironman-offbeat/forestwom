@@ -1,3 +1,4 @@
+import { draftKey, readDraft, writeDraft } from "./local-draft";
 import PublishWorksheet from "./PublishWorksheet";
 import { worksheetResult } from "./worksheet-result";
 import {
@@ -103,6 +104,8 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
   const [caseInfo, setCaseInfo] = useState(emptyCaseInfo);
   const [revision, setRevision] = useState(linkedCase?.review?.revision || 0);
   const [loaded, setLoaded] = useState(!linkedCase);
+  const [recovery, setRecovery] = useState<string | null>(null);
+  const [draftMessage, setDraftMessage] = useState("");
   const [savedContent, setSavedContent] = useState("");
   const content = JSON.stringify({
     caseInfo,
@@ -114,6 +117,43 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
     history,
   });
   const dirty = !!linkedCase && loaded && content !== savedContent;
+  const localKey = linkedCase ? draftKey(linkedCase.id) : "";
+  const localBasis = JSON.stringify([
+    revision,
+    RULE_VERSION,
+    linkedCase?.sourceRevision || 0,
+    linkedCase?.originals.map((f) => [f.id, f.hash]),
+  ]);
+  useEffect(() => {
+    if (!dirty || recovery !== null) return;
+    try {
+      writeDraft(localKey, localBasis, content);
+      setDraftMessage(
+        "변경 내용을 이 기기에 임시 저장했습니다. Drive 저장은 별도로 눌러 주세요. 임시 보관 7일.",
+      );
+    } catch {
+      setDraftMessage(
+        "이 기기에 임시 저장할 수 없습니다. Drive에 저장해 주세요.",
+      );
+    }
+  }, [dirty, recovery, localKey, localBasis, content]);
+  function recoverLocal() {
+    if (!recovery) return;
+    try {
+      const d = JSON.parse(recovery);
+      setCaseInfo(d.caseInfo);
+      setItems(d.items);
+      setEntries(d.entries);
+      setGates(d.gates);
+      setReviewer(d.reviewer);
+      setRemarks(d.remarks);
+      setHistory(d.history);
+      setRecovery(null);
+      setDraftMessage("임시 내용을 복원했습니다. 확인 후 Drive에 저장하세요.");
+    } catch {
+      setError("임시 내용을 복원할 수 없습니다.");
+    }
+  }
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -196,6 +236,13 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
         setSavedContent(JSON.stringify(next));
         setCaseName(linkedCase.name);
         setSelected(restored[0]?.pages[0]?.id || "");
+        try {
+          const local = readDraft(localKey, localBasis);
+          if (local && local.content !== JSON.stringify(next))
+            setRecovery(local.content);
+        } catch {
+          setDraftMessage("임시 내용을 읽을 수 없습니다.");
+        }
         setLoaded(true);
         setStorageMessage(
           saved && saved.ruleVersion !== RULE_VERSION
@@ -251,6 +298,12 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
         revision,
         draft,
       });
+      try {
+        localStorage.removeItem(localKey);
+      } catch {
+        /* Server save is already successful. */
+      }
+      setDraftMessage("");
       setRevision(saved.revision);
       setSavedContent(content);
       setStorageMessage(
@@ -1449,6 +1502,25 @@ export default function App({ linkedCase }: { linkedCase?: CaseRecord }) {
             />
           )}
           {linkedCase && publicError && <p>{publicError}</p>}
+          {linkedCase && (
+            <section className="panel no-print">
+              <p aria-live="polite">{draftMessage}</p>
+              {recovery !== null && (
+                <>
+                  <p>이 접수의 저장하지 않은 임시 내용이 있습니다.</p>
+                  <button onClick={recoverLocal}>임시 검토표 복원</button>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem(localKey);
+                      setRecovery(null);
+                    }}
+                  >
+                    임시 검토표 버리기
+                  </button>
+                </>
+              )}
+            </section>
+          )}
           <footer>
             Forestwom · 선택한 도면과 검토 기록은 저장 버튼을 누를 때 Google
             Drive로 전송됩니다.
