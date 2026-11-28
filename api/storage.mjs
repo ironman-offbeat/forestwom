@@ -1,9 +1,9 @@
+import { appOrigins } from "../server/origins.mjs";
 import { driveAction } from "../server/drive.mjs";
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   const origins = [
-    "https://forestwom.2hayoung.com",
-    "https://forestwom-261.vercel.app",
+    ...appOrigins(),
     "https://ironman-offbeat.github.io",
   ];
   const origin = req.headers.origin;
